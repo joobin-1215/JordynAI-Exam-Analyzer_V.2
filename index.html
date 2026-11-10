@@ -859,6 +859,7 @@ function fitCorners(img, corners, box) {
 }
 
 function SheetAligner({ file, index, total, onDone, onSkip, onCancel }) {
+  useEffect(() => { window.__jordynBusy = (window.__jordynBusy || 0) + 1; return () => { window.__jordynBusy = Math.max(0, (window.__jordynBusy || 1) - 1); }; }, []);   // random human check waits while scanning
   const [url] = useState(() => URL.createObjectURL(file));
   const [img, setImg] = useState(null);
   const [box, setBox] = useState(frameSize());
@@ -938,6 +939,7 @@ function SheetAligner({ file, index, total, onDone, onSkip, onCancel }) {
 
 /* ===================== LIVE CAMERA (auto-capture when the 4 corners are steady) ===================== */
 function LiveScanner({ n, onResult, onClose }) {
+  useEffect(() => { window.__jordynBusy = (window.__jordynBusy || 0) + 1; return () => { window.__jordynBusy = Math.max(0, (window.__jordynBusy || 1) - 1); }; }, []);   // random human check waits while scanning
   const videoRef = useRef(null), streamRef = useRef(null);
   const [status, setStatus] = useState("Starting camera…");
   const [err, setErr] = useState("");
@@ -1375,16 +1377,16 @@ function GoogleButton({ onEmail, onFail }) {
   return <div ref={box} className="flex justify-center min-h-[44px]" />;
 }
 /* Cloudflare Turnstile "Verify you are human" */
-function HumanCheck({ onPass }) {
+function HumanCheck({ onPass, onError }) {
   const box = useRef(null); const [state, setState] = useState("loading");
   const siteKey = CFG.turnstileSiteKey || TURNSTILE_TEST_KEY;
   useEffect(() => { let alive = true, wid = null; (async () => {
     try {
       await loadScript("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit", "cf-turnstile");
       if (!alive || !window.turnstile) throw new Error("ts");
-      wid = window.turnstile.render(box.current, { sitekey: siteKey, theme: "dark", callback: t => { setState("ok"); onPass(t); }, "expired-callback": () => { setState("ready"); onPass(""); }, "error-callback": () => setState("error") });
+      wid = window.turnstile.render(box.current, { sitekey: siteKey, theme: "dark", callback: t => { setState("ok"); onPass(t); }, "expired-callback": () => { setState("ready"); onPass(""); }, "error-callback": () => { setState("error"); onError && onError(); } });
       setState("ready");
-    } catch (e) { if (alive) setState("error"); }
+    } catch (e) { if (alive) { setState("error"); onError && onError(); } }
   })(); return () => { alive = false; try { wid != null && window.turnstile.remove(wid); } catch (e) {} }; }, []);
   return <div className="my-3">
     <div ref={box} className="flex justify-center min-h-[65px]" />
@@ -1392,6 +1394,38 @@ function HumanCheck({ onPass }) {
     {state === "error" && <p className="text-xs text-amber-200 text-center">The human check couldn't load (no internet?). Connect to the internet and open this again.</p>}
     {!CFG.turnstileSiteKey && <p className="text-[10px] text-slate-500 text-center mt-1">Test mode: the real Cloudflare key isn't set yet.</p>}
   </div>;
+}
+
+/* Random "Verify you are human" checks while someone uses the website.
+   First check 5-15 minutes after opening, then every 20-45 minutes of time on the page (random).
+   Never interrupts the live camera or the photo aligner: it waits until they close. */
+const rnd = (a, b) => (a + Math.random() * (b - a)) * 60000;
+function RandomHumanCheck() {
+  const [show, setShow] = useState(false), [failed, setFailed] = useState(false), [k, setK] = useState(0);
+  const st = useRef({ used: 0, due: rnd(5, 15), last: Date.now() });
+  useEffect(() => {
+    const t = setInterval(() => {
+      const now = Date.now(), r = st.current;
+      if (document.visibilityState === "visible") r.used += Math.min(now - r.last, 60000);
+      r.last = now;
+      if (!show && r.used >= r.due && !(window.__jordynBusy > 0)) { setFailed(false); setK(x => x + 1); setShow(true); }
+    }, 15000);
+    return () => clearInterval(t);
+  }, [show]);
+  const pass = tok => { if (!tok) return; setTimeout(() => { st.current.used = 0; st.current.due = rnd(20, 45); setShow(false); }, 600); };
+  if (!show) return null;
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 z-[200] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="glass-strong rounded-2xl p-6 w-full max-w-sm text-center">
+        <div className="text-4xl mb-1">🛡️</div>
+        <h3 className="text-lg font-black text-white">Quick check</h3>
+        <p className="text-sm text-slate-300">Please confirm you're a person to keep using JordynAI. Your work is safe.</p>
+        <HumanCheck key={k} onPass={pass} onError={() => setFailed(true)} />
+        {failed && (navigator.onLine === false
+          ? <button onClick={() => pass("offline")} className="w-full py-2.5 rounded-xl bg-white/10 font-bold text-sm">No internet: continue</button>
+          : <button onClick={() => { setFailed(false); setK(x => x + 1); }} className="w-full py-2.5 rounded-xl bg-cyan-500 text-slate-950 font-bold text-sm">↻ Try again</button>)}
+      </div>
+    </div>, document.body);
 }
 
 /* ===================== LOCK SCREEN + SECURITY ===================== */
@@ -1512,6 +1546,7 @@ function Gate({ children }) {
       <button onClick={lockNow} className="text-cyan-300 hover:underline">🔒 Lock</button>
       {Acct.id && <button onClick={switchAccount} className="text-cyan-300 hover:underline">⇄ Switch account</button>}
     </div>}
+    {!store.db && <RandomHumanCheck />}
     {byAdmin && <div className="bg-amber-500/20 border-b border-amber-400/40 text-amber-100 text-xs text-center p-2">Unlocked with the {Vault.unlockedBy === "admin" ? "admin master password" : "recovery code"}. Set a new password in History → Security.</div>}
     {children}
   </>;
