@@ -1,0 +1,19 @@
+{
+  "type": "jordynai-admin-key",
+  "version": 1,
+  "kid": "KRT+fK5B",
+  "created": "2026-11-10T11:40:59.450Z",
+  "pub": {
+    "crv": "P-256",
+    "ext": true,
+    "key_ops": [],
+    "kty": "EC",
+    "x": "lRfWWDt1deLU-fqiXy9s_JnFMf5HLIcdF3w8vcK1cLk",
+    "y": "uk-Nkx0LYRgx7M_CMDb4Y3xMSiU_MinREY5eJ8E0osA"
+  },
+  "privEnc": {
+    "salt": "SEabrcXFUzniySpfw+yadw==",
+    "iv": "3ZaC0E3PphS3qCxS",
+    "ct": "lSHvGBhW6gN0yebWE5a5zzWil3SBA8BXS+8jvCYbuV8sT9tFHydbJ3wPWR4GtJ7BwucSu+x3uW1xuxGCSCzODxLnjBKDqlkajuFFOp38bUsVt3YuhzoONzC+dzN7f58By54UjAla246Kg6ZQMPn8jr0CFCFymOTSUkYyl9g39cW3tQgFFu0r8JGPDJt92BprwI/K4xabM5Rj9g=="
+  }
+}
