@@ -1286,8 +1286,8 @@ function SecurityCard({ flash, saveFile }) {
     setBusy(false);
   };
   return (
-    <Card>
-      <h3 className="font-black text-white mb-1">🔒 Security</h3>
+    <div id="security" className="scroll-mt-24"><Card>
+      <h3 className="font-black text-white mb-1">🛡️ Security</h3>
       <p className="text-xs text-slate-400 mb-3">Data on this device is encrypted. Auto-lock after 15 minutes without use. Admin lock: {Vault.adminKey ? <b className="text-emerald-300">ON</b> : <b className="text-amber-300">not set up</b>}.</p>
       <div className="flex flex-wrap gap-2 mb-4">
         <button onClick={() => window.__jordynLock && window.__jordynLock()} className="px-3 py-1.5 text-xs rounded-lg bg-white/10">🔒 Lock now</button>
@@ -1301,8 +1301,8 @@ function SecurityCard({ flash, saveFile }) {
       </div>
       <button disabled={busy} onClick={change} className="mt-2 px-4 py-2 text-sm rounded-lg bg-cyan-500 text-slate-950 font-bold disabled:opacity-40">Change password</button>
       {msg && <p className="text-xs text-slate-300 mt-1">{msg}</p>}
-      <details className="mt-5">
-        <summary className="text-xs text-amber-300 cursor-pointer">Admin only: create the admin master key</summary>
+      <div className="mt-5 rounded-xl border border-amber-400/40 bg-amber-400/5 p-3">
+        <h4 className="text-sm font-black text-amber-200">👑 Admin only: create the admin master key</h4>
         <p className="text-xs text-slate-400 mt-2">Choose your admin master password (12+ characters). The app creates <b>admin-key.json</b>, which lets every device add an admin lock that only your master password opens. The password itself is never saved. If you lose it, make a new key; devices update on their next unlock.</p>
         <div className="grid sm:grid-cols-2 gap-2 mt-2">
           <PwInput placeholder="Admin master password" value={m1} onChange={e => setM1(e.target.value)} />
@@ -1310,8 +1310,8 @@ function SecurityCard({ flash, saveFile }) {
         </div>
         <button disabled={busy} onClick={makeAdminKey} className="mt-2 px-4 py-2 text-sm rounded-lg bg-amber-400 text-slate-950 font-bold disabled:opacity-40">Create admin-key.json</button>
         {adminMsg && <p className="text-xs text-slate-300 mt-1">{adminMsg}</p>}
-      </details>
-    </Card>
+      </div>
+    </Card></div>
   );
 }
 
@@ -1686,6 +1686,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={() => setModal("profile")} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 hover:bg-white/15">🏫 Edit Profile / School</button>
+            {!store.db && <button onClick={() => { setRosterView(null); setTab("setup"); setTimeout(() => { const el = document.getElementById("security"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 80); }} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 hover:bg-white/15">🛡️ Security</button>}
             {!store.db && <button onClick={() => window.__jordynLock && window.__jordynLock()} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 hover:bg-white/15" title="Lock now">🔒 Lock</button>}
             <button disabled={!unlocked} onClick={() => setModal("copyAS")} className="px-3 py-1.5 text-xs rounded-lg bg-amber-400 text-slate-950 font-bold disabled:opacity-30">📄 Copy A/S</button>
           </div>
