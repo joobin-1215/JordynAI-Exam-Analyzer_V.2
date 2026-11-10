@@ -1,0 +1,1736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JordynAI Exam Analyzer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+<style>
+  html, body { margin: 0; min-height: 100vh; color: #e2e8f0; font-family: Inter, system-ui, sans-serif;
+    background: linear-gradient(135deg, #020617 0%, #0f172a 45%, #1e1b4b 100%); background-attachment: fixed; }
+  body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background: radial-gradient(circle at 20% 30%, rgba(6,182,212,.12), transparent 40%), radial-gradient(circle at 80% 70%, rgba(16,185,129,.12), transparent 40%); }
+  .font-mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .glass { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09); backdrop-filter: blur(14px); }
+  .glass-strong { background: rgba(15,23,42,.92); border: 1px solid rgba(255,255,255,.12); box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+  select option { background: #0f172a; }
+  @keyframes shake { 0%,100% { transform: translateX(0) } 25% { transform: translateX(-5px) } 75% { transform: translateX(5px) } }
+  .shake { animation: shake .25s 2; }
+  @keyframes scan { 0% { top: 8% } 100% { top: 88% } }
+  .scanline { position: absolute; animation: scan 2.2s ease-in-out infinite alternate; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+window.REGIONS = [{"code":"REGION I","name":"Region I \u2013 Ilocos Region","divisions":["SCHOOLS DIVISION OF ILOCOS NORTE","SCHOOLS DIVISION OF ILOCOS SUR","SCHOOLS DIVISION OF LA UNION","SCHOOLS DIVISION OF PANGASINAN I","SCHOOLS DIVISION OF PANGASINAN II","SCHOOLS DIVISION OF ALAMINOS CITY","SCHOOLS DIVISION OF BATAC CITY","SCHOOLS DIVISION OF CANDON CITY","SCHOOLS DIVISION OF DAGUPAN CITY","SCHOOLS DIVISION OF LAOAG CITY","SCHOOLS DIVISION OF SAN CARLOS CITY","SCHOOLS DIVISION OF SAN FERNANDO CITY","SCHOOLS DIVISION OF URDANETA CITY","SCHOOLS DIVISION OF VIGAN CITY"]},{"code":"REGION II","name":"Region II \u2013 Cagayan Valley","divisions":["SCHOOLS DIVISION OF BATANES","SCHOOLS DIVISION OF CAGAYAN","SCHOOLS DIVISION OF ISABELA","SCHOOLS DIVISION OF NUEVA VIZCAYA","SCHOOLS DIVISION OF QUIRINO","SCHOOLS DIVISION OF CAUAYAN CITY","SCHOOLS DIVISION OF CITY OF ILAGAN","SCHOOLS DIVISION OF SANTIAGO CITY","SCHOOLS DIVISION OF TUGUEGARAO CITY"]},{"code":"REGION III","name":"Region III \u2013 Central Luzon","divisions":["SCHOOLS DIVISION OF AURORA","SCHOOLS DIVISION OF BATAAN","SCHOOLS DIVISION OF BULACAN","SCHOOLS DIVISION OF NUEVA ECIJA","SCHOOLS DIVISION OF PAMPANGA","SCHOOLS DIVISION OF TARLAC","SCHOOLS DIVISION OF ZAMBALES","SCHOOLS DIVISION OF ANGELES CITY","SCHOOLS DIVISION OF BALANGA CITY","SCHOOLS DIVISION OF CABANATUAN CITY","SCHOOLS DIVISION OF GAPAN CITY","SCHOOLS DIVISION OF MABALACAT CITY","SCHOOLS DIVISION OF MALOLOS CITY","SCHOOLS DIVISION OF MEYCAUAYAN CITY","SCHOOLS DIVISION OF OLONGAPO CITY","SCHOOLS DIVISION OF PALAYAN CITY","SCHOOLS DIVISION OF CITY OF SAN FERNANDO","SCHOOLS DIVISION OF SAN JOSE CITY","SCHOOLS DIVISION OF SAN JOSE DEL MONTE CITY","SCHOOLS DIVISION OF TARLAC CITY"]},{"code":"REGION IV-A","name":"Region IV-A \u2013 CALABARZON","divisions":["SCHOOLS DIVISION OF BATANGAS","SCHOOLS DIVISION OF CAVITE","SCHOOLS DIVISION OF LAGUNA","SCHOOLS DIVISION OF QUEZON","SCHOOLS DIVISION OF RIZAL","SCHOOLS DIVISION OF ANTIPOLO CITY","SCHOOLS DIVISION OF BACOOR CITY","SCHOOLS DIVISION OF BATANGAS CITY","SCHOOLS DIVISION OF BI\u00d1AN CITY","SCHOOLS DIVISION OF CABUYAO CITY","SCHOOLS DIVISION OF CALAMBA CITY","SCHOOLS DIVISION OF CAVITE CITY","SCHOOLS DIVISION OF DASMARI\u00d1AS CITY","SCHOOLS DIVISION OF GENERAL TRIAS CITY","SCHOOLS DIVISION OF IMUS CITY","SCHOOLS DIVISION OF LIPA CITY","SCHOOLS DIVISION OF LUCENA CITY","SCHOOLS DIVISION OF SAN PABLO CITY","SCHOOLS DIVISION OF SAN PEDRO CITY","SCHOOLS DIVISION OF SANTA ROSA CITY","SCHOOLS DIVISION OF TANAUAN CITY","SCHOOLS DIVISION OF TAYABAS CITY"]},{"code":"MIMAROPA","name":"MIMAROPA Region","divisions":["SCHOOLS DIVISION OF MARINDUQUE","SCHOOLS DIVISION OF OCCIDENTAL MINDORO","SCHOOLS DIVISION OF ORIENTAL MINDORO","SCHOOLS DIVISION OF PALAWAN","SCHOOLS DIVISION OF ROMBLON","SCHOOLS DIVISION OF CALAPAN CITY","SCHOOLS DIVISION OF PUERTO PRINCESA CITY"]},{"code":"REGION V","name":"Region V \u2013 Bicol Region","divisions":["SCHOOLS DIVISION OF ALBAY","SCHOOLS DIVISION OF CAMARINES NORTE","SCHOOLS DIVISION OF CAMARINES SUR","SCHOOLS DIVISION OF CATANDUANES","SCHOOLS DIVISION OF MASBATE","SCHOOLS DIVISION OF SORSOGON","SCHOOLS DIVISION OF IRIGA CITY","SCHOOLS DIVISION OF LEGAZPI CITY","SCHOOLS DIVISION OF LIGAO CITY","SCHOOLS DIVISION OF MASBATE CITY","SCHOOLS DIVISION OF NAGA CITY","SCHOOLS DIVISION OF SORSOGON CITY","SCHOOLS DIVISION OF TABACO CITY"]},{"code":"REGION VI","name":"Region VI \u2013 Western Visayas","divisions":["SCHOOLS DIVISION OF AKLAN","SCHOOLS DIVISION OF ANTIQUE","SCHOOLS DIVISION OF CAPIZ","SCHOOLS DIVISION OF GUIMARAS","SCHOOLS DIVISION OF ILOILO","SCHOOLS DIVISION OF NEGROS OCCIDENTAL","SCHOOLS DIVISION OF BACOLOD CITY","SCHOOLS DIVISION OF BAGO CITY","SCHOOLS DIVISION OF CADIZ CITY","SCHOOLS DIVISION OF ESCALANTE CITY","SCHOOLS DIVISION OF HIMAMAYLAN CITY","SCHOOLS DIVISION OF ILOILO CITY","SCHOOLS DIVISION OF KABANKALAN CITY","SCHOOLS DIVISION OF LA CARLOTA CITY","SCHOOLS DIVISION OF PASSI CITY","SCHOOLS DIVISION OF ROXAS CITY","SCHOOLS DIVISION OF SAGAY CITY","SCHOOLS DIVISION OF SAN CARLOS CITY","SCHOOLS DIVISION OF SILAY CITY","SCHOOLS DIVISION OF SIPALAY CITY","SCHOOLS DIVISION OF TALISAY CITY","SCHOOLS DIVISION OF VICTORIAS CITY"]},{"code":"REGION VII","name":"Region VII \u2013 Central Visayas","divisions":["SCHOOLS DIVISION OF BOHOL","SCHOOLS DIVISION OF CEBU","SCHOOLS DIVISION OF NEGROS ORIENTAL","SCHOOLS DIVISION OF SIQUIJOR","SCHOOLS DIVISION OF BAIS CITY","SCHOOLS DIVISION OF BAYAWAN CITY","SCHOOLS DIVISION OF BOGO CITY","SCHOOLS DIVISION OF CANLAON CITY","SCHOOLS DIVISION OF CARCAR CITY","SCHOOLS DIVISION OF CEBU CITY","SCHOOLS DIVISION OF CITY OF NAGA","SCHOOLS DIVISION OF DANAO CITY","SCHOOLS DIVISION OF DUMAGUETE CITY","SCHOOLS DIVISION OF GUIHULNGAN CITY","SCHOOLS DIVISION OF LAPU-LAPU CITY","SCHOOLS DIVISION OF MANDAUE CITY","SCHOOLS DIVISION OF TAGBILARAN CITY","SCHOOLS DIVISION OF TALISAY CITY","SCHOOLS DIVISION OF TANJAY CITY","SCHOOLS DIVISION OF TOLEDO CITY"]},{"code":"REGION VIII","name":"Region VIII \u2013 Eastern Visayas","divisions":["SCHOOLS DIVISION OF BILIRAN","SCHOOLS DIVISION OF EASTERN SAMAR","SCHOOLS DIVISION OF LEYTE","SCHOOLS DIVISION OF NORTHERN SAMAR","SCHOOLS DIVISION OF SAMAR (WESTERN SAMAR)","SCHOOLS DIVISION OF SOUTHERN LEYTE","SCHOOLS DIVISION OF BAYBAY CITY","SCHOOLS DIVISION OF BORONGAN CITY","SCHOOLS DIVISION OF CALBAYOG CITY","SCHOOLS DIVISION OF CATBALOGAN CITY","SCHOOLS DIVISION OF MAASIN CITY","SCHOOLS DIVISION OF ORMOC CITY","SCHOOLS DIVISION OF TACLOBAN CITY"]},{"code":"REGION IX","name":"Region IX \u2013 Zamboanga Peninsula","divisions":["SCHOOLS DIVISION OF ZAMBOANGA DEL NORTE","SCHOOLS DIVISION OF ZAMBOANGA DEL SUR","SCHOOLS DIVISION OF ZAMBOANGA SIBUGAY","SCHOOLS DIVISION OF DAPITAN CITY","SCHOOLS DIVISION OF DIPOLOG CITY","SCHOOLS DIVISION OF ISABELA CITY","SCHOOLS DIVISION OF PAGADIAN CITY","SCHOOLS DIVISION OF ZAMBOANGA CITY"]},{"code":"REGION X","name":"Region X \u2013 Northern Mindanao","divisions":["SCHOOLS DIVISION OF BUKIDNON","SCHOOLS DIVISION OF CAMIGUIN","SCHOOLS DIVISION OF LANAO DEL NORTE","SCHOOLS DIVISION OF MISAMIS OCCIDENTAL","SCHOOLS DIVISION OF MISAMIS ORIENTAL","SCHOOLS DIVISION OF CAGAYAN DE ORO CITY","SCHOOLS DIVISION OF EL SALVADOR CITY","SCHOOLS DIVISION OF GINGOOG CITY","SCHOOLS DIVISION OF ILIGAN CITY","SCHOOLS DIVISION OF MALAYBALAY CITY","SCHOOLS DIVISION OF OROQUIETA CITY","SCHOOLS DIVISION OF OZAMIZ CITY","SCHOOLS DIVISION OF TANGUB CITY","SCHOOLS DIVISION OF VALENCIA CITY"]},{"code":"REGION XI","name":"Region XI \u2013 Davao Region","divisions":["SCHOOLS DIVISION OF DAVAO DE ORO","SCHOOLS DIVISION OF DAVAO DEL NORTE","SCHOOLS DIVISION OF DAVAO DEL SUR","SCHOOLS DIVISION OF DAVAO OCCIDENTAL","SCHOOLS DIVISION OF DAVAO ORIENTAL","SCHOOLS DIVISION OF DAVAO CITY","SCHOOLS DIVISION OF DIGOS CITY","SCHOOLS DIVISION OF ISLAND GARDEN CITY OF SAMAL","SCHOOLS DIVISION OF MATI CITY","SCHOOLS DIVISION OF PANABO CITY","SCHOOLS DIVISION OF TAGUM CITY"]},{"code":"REGION XII","name":"Region XII \u2013 SOCCSKSARGEN","divisions":["SCHOOLS DIVISION OF COTABATO","SCHOOLS DIVISION OF SARANGANI","SCHOOLS DIVISION OF SOUTH COTABATO","SCHOOLS DIVISION OF SULTAN KUDARAT","SCHOOLS DIVISION OF GENERAL SANTOS CITY","SCHOOLS DIVISION OF KIDAPAWAN CITY","SCHOOLS DIVISION OF KORONADAL CITY","SCHOOLS DIVISION OF TACURONG CITY"]},{"code":"REGION XIII","name":"Region XIII \u2013 Caraga","divisions":["SCHOOLS DIVISION OF AGUSAN DEL NORTE","SCHOOLS DIVISION OF AGUSAN DEL SUR","SCHOOLS DIVISION OF DINAGAT ISLANDS","SCHOOLS DIVISION OF SURIGAO DEL NORTE","SCHOOLS DIVISION OF SURIGAO DEL SUR","SCHOOLS DIVISION OF BAYUGAN CITY","SCHOOLS DIVISION OF BISLIG CITY","SCHOOLS DIVISION OF BUTUAN CITY","SCHOOLS DIVISION OF CABADBARAN CITY","SCHOOLS DIVISION OF SURIGAO CITY","SCHOOLS DIVISION OF TANDAG CITY"]},{"code":"NCR","name":"NCR \u2013 National Capital Region","divisions":["SCHOOLS DIVISION OF CALOOCAN","SCHOOLS DIVISION OF LAS PI\u00d1AS","SCHOOLS DIVISION OF MAKATI","SCHOOLS DIVISION OF MALABON","SCHOOLS DIVISION OF MANDALUYONG","SCHOOLS DIVISION OF MANILA","SCHOOLS DIVISION OF MARIKINA","SCHOOLS DIVISION OF MUNTINLUPA","SCHOOLS DIVISION OF NAVOTAS","SCHOOLS DIVISION OF PARA\u00d1AQUE","SCHOOLS DIVISION OF PASAY","SCHOOLS DIVISION OF PASIG","SCHOOLS DIVISION OF QUEZON CITY","SCHOOLS DIVISION OF SAN JUAN","SCHOOLS DIVISION OF TAGUIG CITY AND PATEROS","SCHOOLS DIVISION OF VALENZUELA"]},{"code":"CAR","name":"CAR \u2013 Cordillera Administrative Region","divisions":["SCHOOLS DIVISION OF ABRA","SCHOOLS DIVISION OF APAYAO","SCHOOLS DIVISION OF BENGUET","SCHOOLS DIVISION OF IFUGAO","SCHOOLS DIVISION OF KALINGA","SCHOOLS DIVISION OF MOUNTAIN PROVINCE","SCHOOLS DIVISION OF BAGUIO CITY","SCHOOLS DIVISION OF TABUK CITY"]},{"code":"BARMM","name":"BARMM \u2013 Bangsamoro Autonomous Region in Muslim Mindanao","divisions":["SCHOOLS DIVISION OF BASILAN","SCHOOLS DIVISION OF LANAO DEL SUR I","SCHOOLS DIVISION OF LANAO DEL SUR II","SCHOOLS DIVISION OF MAGUINDANAO I","SCHOOLS DIVISION OF MAGUINDANAO II","SCHOOLS DIVISION OF SULU","SCHOOLS DIVISION OF TAWI-TAWI","SCHOOLS DIVISION OF COTABATO CITY","SCHOOLS DIVISION OF MARAWI CITY","SCHOOLS DIVISION OF LAMITAN CITY","SCHOOLS DIVISION OF SPECIAL GEOGRAPHIC AREA"]}];
+</script>
+<script type="text/babel">
+const REGIONS = window.REGIONS;
+const { useState, useMemo, useEffect, useRef } = React;
+
+/* ===================== DATA ===================== */
+const LETTERS = ["A", "B", "C", "D"];
+const SUBJECTS = [
+  { code: "english", label: "English" },
+  { code: "math", label: "Mathematics" },
+  { code: "ap", label: "Araling Panlipunan" },
+  { code: "science", label: "Science" },
+  { code: "esp", label: "ESP" },
+  { code: "tle", label: "TLE" },
+  { code: "filipino", label: "Filipino" },
+  { code: "mapeh-music-arts", label: "Music and Arts", comps: ["Music", "Arts"] },
+  { code: "mapeh-pe-health", label: "PE and Health", comps: ["PE", "Health"] },
+  { code: "mapeh-whole", label: "MAPEH (whole)", termOnly: true, comps: ["Music", "Arts", "PE", "Health"] },
+];
+const GRADES = ["Kinder", "Grade 1", "Grade 2", "Grade 3", "Grade 4", "Grade 5", "Grade 6", "Grade 7", "Grade 8", "Grade 9", "Grade 10", "Grade 11", "Grade 12"];
+const subjectOf = code => SUBJECTS.find(s => s.code === code) || SUBJECTS[0];
+const DEFAULT_PROFILE = { region: "", division: "", school: "", configured: false };
+const SLOTS = { ST1: "Summative Test 1", ST2: "Summative Test 2", TE: "Term Examination" };
+const termNow = () => { const m = new Date().getMonth() + 1, d = new Date().getDate(); return (m >= 6 && (m < 9 || (m === 9 && d <= 15))) ? "Term 1" : (m >= 9 && m <= 12) ? "Term 2" : "Term 3"; };
+const DEFAULT_CONFIG = { examType: "term", slot: "TE", term: termNow(), subject: "mapeh-music-arts", itemCount: 50, tags: null };
+/* DO 15, s. 2026 item counts: [Term Exam items, max items per Summative Test] */
+function itemRule(grade) {
+  const g = parseInt(String(grade).replace(/\D/g, ""), 10);
+  if (g >= 4 && g <= 6) return { te: 40, st: 20, ks: "Grades 4–6" };
+  if (g >= 7 && g <= 10) return { te: 50, st: 25, ks: "Grades 7–10" };
+  if (g >= 11 && g <= 12) return { te: 60, st: 30, ks: "Grades 11–12" };
+  return null;
+}
+/* Learner names never go to Claude: they are kept only in this browser. */
+const localStore = {
+  get(k, fb) { try { const v = JSON.parse(localStorage.getItem("jordynai_" + k) || "null"); return v == null ? fb : v; } catch (e) { return fb; } },
+  set(k, v) { try { if (v == null) localStorage.removeItem("jordynai_" + k); else localStorage.setItem("jordynai_" + k, JSON.stringify(v)); return true; } catch (e) { return false; } },
+};
+const COMP_STYLE = ["bg-violet-500", "bg-pink-500", "bg-emerald-500", "bg-sky-500"];
+/* Default component blocks: earlier components get the smaller share (12 + 13, or 12 + 13 + 12 + 13 for 50). */
+function defaultTags(n, comps) {
+  if (!comps) return null;
+  const k = comps.length, base = Math.floor(n / k);
+  let extra = n - base * k;
+  const sizes = comps.map(() => base);
+  for (let i = k - 1; i >= 0 && extra > 0; i -= 2) { sizes[i]++; extra--; }
+  for (let i = k - 2; i >= 0 && extra > 0; i -= 2) { sizes[i]++; extra--; }
+  const tags = []; sizes.forEach((sz, ci) => { for (let j = 0; j < sz; j++) tags.push(ci); });
+  return tags;
+}
+/* "1,3,6-8" -> [1,3,6,7,8] */
+function parseItems(text, n) {
+  const out = new Set();
+  String(text || "").split(/[,\s]+/).filter(Boolean).forEach(part => {
+    const m = part.match(/^(\d+)(?:-(\d+))?$/); if (!m) return;
+    const a = +m[1], b = m[2] ? +m[2] : a;
+    for (let i = Math.min(a, b); i <= Math.max(a, b); i++) if (i >= 1 && i <= n) out.add(i);
+  });
+  return [...out].sort((x, y) => x - y);
+}
+const listItems = arr => { const out = []; let i = 0; while (i < arr.length) { let j = i; while (j + 1 < arr.length && arr[j + 1] === arr[j] + 1) j++; out.push(j > i ? `${arr[i]}-${arr[j]}` : `${arr[i]}`); i = j + 1; } return out.join(", "); };
+
+/* ===================== HELPERS ===================== */
+function toInitials(full) {
+  const str = String(full || "").trim();
+  if (!str) return "";
+  if (/^([A-Za-zÑñ]\.)+$/.test(str.replace(/\s/g, ""))) return str.replace(/\s/g, "").toUpperCase();
+  let first = str, last = "";
+  if (str.includes(",")) { const [l, ...f] = str.split(","); last = l; first = f.join(" "); }
+  const letters = w => w.split(/[\s.-]+/).filter(Boolean).map(x => x[0].toUpperCase());
+  return [...letters(first), ...letters(last)].map(c => c + ".").join("");
+}
+function proficiency(p) {
+  if (p >= 96) return { label: "Mastered", color: "bg-emerald-500" };
+  if (p >= 86) return { label: "Closely Approximating Mastery", color: "bg-emerald-600" };
+  if (p >= 66) return { label: "Moving Towards Mastery", color: "bg-sky-500" };
+  if (p >= 35) return { label: "Average Mastery", color: "bg-amber-500" };
+  if (p >= 15) return { label: "Low Mastery", color: "bg-orange-500" };
+  if (p >= 5) return { label: "Very Low Mastery", color: "bg-red-500" };
+  return { label: "Absolutely No Mastery", color: "bg-red-700" };
+}
+const idNum = id => parseInt(String(id).replace(/\D/g, ""), 10) || 0;
+const gender = id => { const c = String(id).trim().toUpperCase()[0]; return c === "B" ? "B" : c === "G" ? "G" : "?"; };
+const fmt = n => (Number.isFinite(n) ? n.toFixed(2) : "0.00");
+const up = v => String(v || "").toUpperCase();
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const sdOf = arr => { if (!arr.length) return 0; const m = arr.reduce((t, s) => t + s.score, 0) / arr.length; return Math.sqrt(arr.reduce((t, s) => t + (s.score - m) ** 2, 0) / arr.length); };
+
+/* ===================== SHEET LAYOUT ===================== */
+/* Pick the column count that gives the biggest bubbles for this many items. All sizes in mm. */
+function sheetLayout(n) {
+  const AVAIL_H = 87, WIDTH = 93, GAP = 1.6;
+  let best = null;
+  for (let cols = 1; cols <= 4; cols++) {
+    const rows = Math.ceil(n / cols);
+    const rowH = Math.min(13, AVAIL_H / rows);
+    const colW = (WIDTH - GAP * (cols - 1)) / cols;
+    const b = Math.min(rowH * 0.62, ((colW - 6) / 4) * 0.8, 7);
+    if (!best || b > best.b + 0.05 || (Math.abs(b - best.b) <= 0.05 && rowH > best.rowH)) best = { cols, rows, rowH, colW, b };
+  }
+  best.gap = Math.max(0.8, Math.min(2.2, ((best.colW - 6) / 4) - best.b));
+  return best;
+}
+
+/* Printable code list for the teacher (names + codes). Built in the browser, never sent to Claude. */
+function buildCodeListHtml(profile, label, rs) {
+  const rows = (arr, g) => arr.map((v, i) => v ? `<tr><td class="c">${g}-${i + 1}</td><td>${esc(v)}</td></tr>` : "").join("");
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Code List · ${esc(label)}</title><style>
+@page { size: A4 portrait; margin: 12mm; } body { font: 10pt Arial, sans-serif; color: #000; }
+h1 { font-size: 13pt; margin: 0 0 1mm; } p { margin: 0 0 4mm; font-size: 8.5pt; color: #444; }
+.cols { display: flex; gap: 8mm; } table { border-collapse: collapse; width: 100%; } td, th { border: 0.2mm solid #999; padding: 1.2mm 2mm; text-align: left; }
+th { background: #eee; } .c { font-weight: 700; width: 14mm; font-family: monospace; }
+</style></head><body><h1>CODE LIST · ${esc(label)}</h1>
+<p>${esc(up(profile.school))} · Teacher's copy. Give each learner the sheet with their code. Keep this list private.</p>
+<div class="cols"><table><tr><th>Code</th><th>BOYS</th></tr>${rows(rs.boys, "B")}</table><table><tr><th>Code</th><th>GIRLS</th></tr>${rows(rs.girls, "G")}</table></div></body></html>`;
+}
+
+/* ===================== ANSWER SHEETS: exact millimetre geometry (shared by printing AND the bubble reader) ===================== */
+/* Every position below is in mm inside one 105 x 148.5 mm quarter-sheet. The reader uses the SAME numbers. */
+const GEO = {
+  W: 105, H: 148.5,
+  corners: [[4, 4], [96, 4], [4, 139.5], [96, 139.5]], cornerSize: 5,          // black squares; centers 6.5 mm from the edges
+  itemsTop: 46.2, itemsLeft: 6, colGap: 1.6,
+  codeBox: { x: 79, y: 19.5, w: 20, h: 18.5 },
+  dots: { x0: 80.2, y: 33.4, size: 1.6, step: 2.0, count: 9 },                 // CODE dot strip inside the box
+  paperProbe: [[20, 138.6], [35, 138.6], [50, 138.6], [65, 138.6], [80, 138.6], [52.5, 41.9], [30, 20.5], [70, 20.5]],
+};
+/* Dot code, 9 cells: [start=1, isGirl, isKey, n5 n4 n3 n2 n1 n0] -> B-1..B-63, G-1..G-63, KEY */
+function codeToBits(code) {
+  const c = up(code).replace(/\s/g, "");
+  if (c === "KEY") return [1, 0, 1, 0, 0, 0, 0, 0, 0];
+  const m = c.match(/^([BG])-?(\d{1,2})$/); if (!m) return null;
+  const n = +m[2]; if (n < 1 || n > 63) return null;
+  return [1, m[1] === "G" ? 1 : 0, 0, ...[5, 4, 3, 2, 1, 0].map(b => (n >> b) & 1)];
+}
+function bitsToCode(bits) {
+  if (!bits || bits[0] !== 1) return null;
+  if (bits[2]) return bits[1] || bits.slice(3).some(Boolean) ? null : "KEY";
+  const n = bits.slice(3).reduce((t, b) => t * 2 + b, 0);
+  return n >= 1 ? `${bits[1] ? "G" : "B"}-${n}` : null;
+}
+/* Where each bubble's center is (mm, sheet-local). */
+function bubbleCenters(n) {
+  const L = sheetLayout(n), noW = Math.max(4.4, L.b * 1.3), out = [];
+  for (let q = 1; q <= n; q++) {
+    const c = Math.floor((q - 1) / L.rows), r = (q - 1) % L.rows;
+    const cx = GEO.itemsLeft + c * (L.colW + GEO.colGap);
+    const cy = GEO.itemsTop + 3.4 + r * L.rowH + L.rowH / 2;
+    out.push([0, 1, 2, 3].map(k => [cx + noW + L.b / 2 + k * (L.b + L.gap), cy]));
+  }
+  return { L, noW, centers: out };
+}
+
+/* Draw one quarter-sheet at (ox, oy). learner = {code, name} (code "" = blank sheet to fill by hand) */
+function drawSheetCell(pen, o, learner, ox, oy) {
+  const X = v => ox + v, Y = v => oy + v;
+  const { L, noW, centers } = bubbleCenters(o.n);
+  const reg = up(o.profile.region) || "REGION", div = up(o.profile.division) || "SCHOOLS DIVISION";
+  const school = up(o.profile.school) || "SCHOOL NAME";
+  const code = up(learner.code || ""), isKey = code === "KEY", blank = !code;
+  for (const [x, y] of GEO.corners) pen.rect(X(x), Y(y), GEO.cornerSize, GEO.cornerSize, { fill: "#000" });
+  pen.text("REPUBLIC OF THE PHILIPPINES · DEPARTMENT OF EDUCATION", X(52.5), Y(8), 5, { align: "center" });
+  pen.text(`${reg} · ${div}`, X(52.5), Y(10.4), 5, { align: "center" });
+  pen.text(school, X(52.5), Y(13.6), school.length > 44 ? 5.8 : 7, { align: "center", bold: true });
+  pen.text("ANSWER SHEET", X(52.5), Y(17.4), 8.5, { align: "center", bold: true });
+  const field = (label, x, y, x2, printed) => {
+    pen.text(label, X(x), Y(y), 6.2);
+    const lx = X(x) + pen.width(label, 6.2) + 1;
+    pen.line(lx, Y(y + 0.6), X(x2), Y(y + 0.6), 0.15, "#000");
+    if (printed) pen.text(printed, lx + 0.8, Y(y - 0.2), 6, { bold: true });
+  };
+  field("Name:", 6, 23, 76, isKey ? "TEACHER'S ANSWER KEY" : "");
+  field("Grade & Section:", 6, 27.6, 76, blank ? "" : (o.gradeSection || ""));
+  field("Subject:", 6, 32.2, 52, o.subject || ""); field("Date:", 54, 32.2, 76, "");
+  field("Exam:", 6, 36.8, 52, o.exam || ""); field("Score:", 54, 36.8, 70, "");
+  pen.text(`/ ${o.n}`, X(70.6), Y(36.8), 6.2);
+  const B = GEO.codeBox;
+  pen.rect(X(B.x), Y(B.y), B.w, B.h, { stroke: "#000", lw: 0.6, r: 1.5 });
+  pen.text("CODE", X(B.x + B.w / 2), Y(B.y + 2.8), 4.8, { align: "center", bold: true });
+  if (blank) pen.text("write: B-__ or G-__", X(B.x + B.w / 2), Y(B.y + 17.1), 3.8, { align: "center", color: "#777777" });
+  else {
+    pen.text(isKey ? "KEY" : code, X(B.x + B.w / 2), Y(B.y + 10.6), isKey ? 13 : (code.length > 4 ? 14 : 16), { align: "center", bold: true });
+    const bits = codeToBits(code), D = GEO.dots;
+    if (bits) bits.forEach((bit, i) => pen.rect(X(D.x0 + i * D.step), Y(D.y), D.size, D.size, bit ? { fill: "#000" } : { stroke: "#000", lw: 0.15 }));
+  }
+  pen.text("Shade the circle of your answer FULLY and darkly. Use a pencil or black pen. One answer per number.", X(52.5), Y(41.3), 4.8, { align: "center" });
+  pen.text(blank ? "No check or X marks. Write your CODE in the box (ask your teacher)." : "No check or X marks. Do not write your name; your CODE identifies you.", X(52.5), Y(43.4), 4.8, { align: "center" });
+  const fs = Math.max(4.6, Math.min(9, L.b * 1.45)), nf = Math.max(5.4, Math.min(10, L.b * 1.7));
+  for (let c = 0; c < L.cols; c++) {
+    const start = c * L.rows + 1; if (start > o.n) break;
+    const cx = GEO.itemsLeft + c * (L.colW + GEO.colGap);
+    ["A", "B", "C", "D"].forEach((l, k) => pen.text(l, X(cx + noW + L.b / 2 + k * (L.b + L.gap)), Y(GEO.itemsTop + 2.4), Math.max(5, fs), { align: "center", bold: true }));
+    for (let q = start; q <= Math.min(start + L.rows - 1, o.n); q++) {
+      const r = q - start, ry = GEO.itemsTop + 3.4 + r * L.rowH;
+      if (r % 2 === 0) pen.rect(X(cx), Y(ry), L.colW, L.rowH, { fill: "#eef0f8" });
+      const cy = ry + L.rowH / 2;
+      pen.text(String(q), X(cx + noW - 0.8), Y(cy + nf * 0.12), nf, { align: "right", bold: true });
+      centers[q - 1].forEach(([bx], k) => {
+        pen.circle(X(bx), Y(cy), L.b / 2, { stroke: "#000", lw: 0.22, fill: "#fff" });
+        pen.text("ABCD"[k], X(bx), Y(cy + fs * 0.12), fs, { align: "center", color: "#b4b4b4" });   // light letters: not mistaken for shading
+      });
+    }
+  }
+  pen.text(blank ? "Extra / late-enrollee answer sheet · Do not fold. Keep the four black corners clean." : (isKey ? "TEACHER'S ANSWER KEY · scan this first" : "Do not fold. Keep the four black corners and the CODE dots clean."), X(52.5), Y(144), 4.3, { align: "center", color: "#777777" });
+}
+function drawPage(pen, o, cells) {
+  pen.dash(true); pen.line(105, 0, 105, 297, 0.3, "#888888"); pen.line(0, 148.5, 210, 148.5, 0.3, "#888888"); pen.dash(false);
+  [[0, 0], [105, 0], [0, 148.5], [105, 148.5]].forEach(([ox, oy], i) => { if (cells[i]) drawSheetCell(pen, o, cells[i], ox, oy); });
+}
+
+const PT = 0.3528; // 1 pt in mm
+function pdfPen(doc) {
+  const hex = h => { if (h.length === 4) h = "#" + h[1] + h[1] + h[2] + h[2] + h[3] + h[3]; return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; };
+  return {
+    dash(on) { if (doc.setLineDashPattern) doc.setLineDashPattern(on ? [1.5, 1] : [], 0); },
+    line(x1, y1, x2, y2, lw, color) { doc.setLineWidth(lw); doc.setDrawColor(...hex(color)); doc.line(x1, y1, x2, y2); },
+    rect(x, y, w, h, s) {
+      if (s.fill) doc.setFillColor(...hex(s.fill)); if (s.stroke) { doc.setDrawColor(...hex(s.stroke)); doc.setLineWidth(s.lw || 0.2); }
+      const mode = s.fill && s.stroke ? "FD" : s.fill ? "F" : "S";
+      if (s.r) doc.roundedRect(x, y, w, h, s.r, s.r, mode); else doc.rect(x, y, w, h, mode);
+    },
+    circle(x, y, r, s) { doc.setFillColor(...hex(s.fill || "#ffffff")); doc.setDrawColor(...hex(s.stroke || "#000000")); doc.setLineWidth(s.lw || 0.2); doc.circle(x, y, r, "FD"); },
+    text(t, x, y, pt, s = {}) { doc.setFont("helvetica", s.bold ? "bold" : "normal"); doc.setFontSize(pt); doc.setTextColor(...hex(s.color || "#000000")); doc.text(String(t), x, y, { align: s.align || "left" }); },
+    width(t, pt) { doc.setFont("helvetica", "normal"); doc.setFontSize(pt); return doc.getTextWidth(String(t)); },
+  };
+}
+function canvasPen(ctx, k) { // k = pixels per mm
+  return {
+    dash(on) { ctx.setLineDash(on ? [1.5 * k, 1 * k] : []); },
+    line(x1, y1, x2, y2, lw, color) { ctx.strokeStyle = color; ctx.lineWidth = lw * k; ctx.beginPath(); ctx.moveTo(x1 * k, y1 * k); ctx.lineTo(x2 * k, y2 * k); ctx.stroke(); },
+    rect(x, y, w, h, s) {
+      ctx.beginPath();
+      if (s.r && ctx.roundRect) ctx.roundRect(x * k, y * k, w * k, h * k, s.r * k); else ctx.rect(x * k, y * k, w * k, h * k);
+      if (s.fill) { ctx.fillStyle = s.fill; ctx.fill(); } if (s.stroke) { ctx.strokeStyle = s.stroke; ctx.lineWidth = (s.lw || 0.2) * k; ctx.stroke(); }
+    },
+    circle(x, y, r, s) { ctx.beginPath(); ctx.arc(x * k, y * k, r * k, 0, Math.PI * 2); ctx.fillStyle = s.fill || "#fff"; ctx.fill(); ctx.strokeStyle = s.stroke || "#000"; ctx.lineWidth = (s.lw || 0.2) * k; ctx.stroke(); },
+    text(t, x, y, pt, s = {}) { ctx.font = `${s.bold ? "bold " : ""}${pt * PT * k}px Helvetica, Arial, sans-serif`; ctx.fillStyle = s.color || "#000"; ctx.textAlign = s.align || "left"; ctx.textBaseline = "alphabetic"; ctx.fillText(String(t), x * k, y * k); },
+    width(t, pt) { ctx.font = `${pt * PT * k}px Helvetica, Arial, sans-serif`; return ctx.measureText(String(t)).width / k; },
+  };
+}
+const chunk4 = list => { const out = []; for (let i = 0; i < list.length; i += 4) out.push([list[i], list[i + 1], list[i + 2], list[i + 3]]); return out; };
+/* learners: list of {code, name}; blank sheets = [{code:""} x 4 per page] */
+function sheetsPdf(o, learners) {
+  const doc = new window.jspdf.jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+  chunk4(learners).forEach((cells, p) => { if (p) doc.addPage(); drawPage(pdfPen(doc), o, cells); });
+  return doc.output("blob");
+}
+async function sheetsDocx(o, learners) {
+  const k = 300 / 25.4, D = window.docx, pages = [];
+  for (const cells of chunk4(learners)) {
+    const c = document.createElement("canvas"); c.width = Math.round(210 * k); c.height = Math.round(297 * k);
+    const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+    drawPage(canvasPen(ctx, k), o, cells);
+    const jpg = await new Promise(res => c.toBlob(res, "image/jpeg", 0.9));
+    pages.push(new Uint8Array(await jpg.arrayBuffer()));
+  }
+  const doc = new D.Document({
+    creator: "JordynAI Exam Analyzer", title: "DepEd OMR Answer Sheets",
+    sections: pages.map(data => ({
+      properties: { page: { size: { width: 11906, height: 16838, orientation: D.PageOrientation.PORTRAIT }, margin: { top: 0, right: 0, bottom: 0, left: 0, header: 0, footer: 0 } } },
+      children: [new D.Paragraph({ spacing: { before: 0, after: 0 }, children: [new D.ImageRun({ type: "jpg", data, transformation: { width: 793, height: 1121 } })] })],
+    })),
+  });
+  return D.Packer.toBlob(doc);
+}
+const blankList = pages => Array.from({ length: pages * 4 }, () => ({ code: "", name: "" }));
+
+/* ===================== FREE BUBBLE READER (runs on the device, no AI) ===================== */
+function toGray(src, maxDim) {
+  const w0 = src.naturalWidth || src.videoWidth || src.width, h0 = src.naturalHeight || src.videoHeight || src.height;
+  const k = Math.min(1, maxDim / Math.max(w0, h0));
+  const W = Math.round(w0 * k), H = Math.round(h0 * k);
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const ctx = c.getContext("2d", { willReadFrequently: true }); ctx.drawImage(src, 0, 0, W, H);
+  const px = ctx.getImageData(0, 0, W, H).data, g = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) g[i] = (px[i * 4] * 0.3 + px[i * 4 + 1] * 0.59 + px[i * 4 + 2] * 0.11) | 0;
+  return { g, W, H, k };
+}
+/* Coarse corner search on a small image: dark, solid, square blobs at the 4 extremes. */
+function coarseCorners(G) {
+  const { g, W, H } = G; let sum = 0;
+  for (let i = 0; i < W * H; i++) sum += g[i];
+  const thr = Math.min(100, (sum / (W * H)) * 0.5);
+  const seen = new Uint8Array(W * H), blobs = [], area = W * H;
+  for (let i = 0; i < W * H; i++) {
+    if (seen[i] || g[i] > thr) continue;
+    let minx = W, maxx = 0, miny = H, maxy = 0, n = 0, sx = 0, sy = 0; const st = [i]; seen[i] = 1;
+    while (st.length) {
+      const j = st.pop(), x = j % W, y = (j / W) | 0; n++; sx += x; sy += y;
+      if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
+      if (x > 0 && !seen[j - 1] && g[j - 1] <= thr) { seen[j - 1] = 1; st.push(j - 1); }
+      if (x < W - 1 && !seen[j + 1] && g[j + 1] <= thr) { seen[j + 1] = 1; st.push(j + 1); }
+      if (y > 0 && !seen[j - W] && g[j - W] <= thr) { seen[j - W] = 1; st.push(j - W); }
+      if (y < H - 1 && !seen[j + W] && g[j + W] <= thr) { seen[j + W] = 1; st.push(j + W); }
+    }
+    const bw = maxx - minx + 1, bh = maxy - miny + 1;
+    if (n > area * 0.00008 && n < area * 0.02 && bw / bh > 0.6 && bw / bh < 1.65 && n / (bw * bh) > 0.62) blobs.push({ x: sx / n, y: sy / n, n });
+  }
+  if (blobs.length < 4) return null;
+  const pick = f => blobs.reduce((a, b) => (f(b) > f(a) ? b : a));
+  const tl = pick(b => -(b.x + b.y)), br = pick(b => b.x + b.y), tr = pick(b => b.x - b.y), bl = pick(b => b.y - b.x);
+  const pts = [tl, tr, bl, br];
+  if (new Set(pts).size < 4) return null;
+  const sizes = pts.map(p => p.n), smin = Math.min(...sizes), smax = Math.max(...sizes);
+  if (smax > smin * 4) return null;                                  // the 4 squares should be about the same size
+  const wTop = Math.hypot(tr.x - tl.x, tr.y - tl.y), wBot = Math.hypot(br.x - bl.x, br.y - bl.y);
+  const hL = Math.hypot(bl.x - tl.x, bl.y - tl.y), hR = Math.hypot(br.x - tr.x, br.y - tr.y);
+  const ratio = (hL + hR) / (wTop + wBot);                            // (142-6.5)/(98.5-6.5) = 1.473
+  if (ratio < 1.2 || ratio > 1.8 || wTop < W * 0.12) return null;
+  return { pts: pts.map(p => ({ x: p.x, y: p.y })), thr };
+}
+/* Precise centers on a bigger image: flood-fill the dark square nearest each coarse guess. */
+function refineCorners(G, guess, thr) {
+  const { g, W, H } = G;
+  return guess.map(p => {
+    const cx = Math.round(p.x), cy = Math.round(p.y);
+    let start = -1;
+    for (let r = 0; r < 25 && start < 0; r++) for (let dy = -r; dy <= r && start < 0; dy++) for (let dx = -r; dx <= r; dx++) {
+      const x = cx + dx, y = cy + dy; if (x < 0 || y < 0 || x >= W || y >= H) continue;
+      if (g[y * W + x] <= thr) { start = y * W + x; break; }
+    }
+    if (start < 0) return p;
+    const seen = new Set([start]), st = [start]; let n = 0, sx = 0, sy = 0; const lim = W * H * 0.03;
+    while (st.length && n < lim) {
+      const j = st.pop(), x = j % W, y = (j / W) | 0; n++; sx += x; sy += y;
+      for (const q of [x > 0 ? j - 1 : -1, x < W - 1 ? j + 1 : -1, j - W, j + W]) if (q >= 0 && q < W * H && !seen.has(q) && g[q] <= thr) { seen.add(q); st.push(q); }
+    }
+    return { x: sx / n, y: sy / n };
+  });
+}
+/* Perspective transform from 4 point pairs (src -> dst). */
+function homography(src, dst) {
+  const A = [], b = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = src[i], [u, v] = dst[i];
+    A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); b.push(u);
+    A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); b.push(v);
+  }
+  for (let c = 0; c < 8; c++) {                                       // Gaussian elimination
+    let p = c; for (let r = c + 1; r < 8; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+    [A[c], A[p]] = [A[p], A[c]]; [b[c], b[p]] = [b[p], b[c]];
+    for (let r = 0; r < 8; r++) if (r !== c) { const f = A[r][c] / A[c][c]; for (let k = c; k < 8; k++) A[r][k] -= f * A[c][k]; b[r] -= f * b[c]; }
+  }
+  const h = b.map((v, i) => v / A[i][i]);
+  return (x, y) => { const d = h[6] * x + h[7] * y + 1; return [(h[0] * x + h[1] * y + h[2]) / d, (h[3] * x + h[4] * y + h[5]) / d]; };
+}
+const CORNER_MM = GEO.corners.map(([x, y]) => [x + GEO.cornerSize / 2, y + GEO.cornerSize / 2]);
+
+/* Locate the sheet in an image: returns { G, map: mm -> pixel } or null */
+function locateSheet(src) {
+  const small = toGray(src, 520), coarse = coarseCorners(small);
+  if (!coarse) return null;
+  const G = toGray(src, 2200), s = G.k / small.k;
+  const pts = refineCorners(G, coarse.pts.map(p => ({ x: p.x * s, y: p.y * s })), coarse.thr + 10);
+  return { G, pts, map: homography(CORNER_MM, pts.map(p => [p.x, p.y])) };
+}
+function lum(G, x, y) { const xi = Math.round(x), yi = Math.round(y); if (xi < 0 || yi < 0 || xi >= G.W || yi >= G.H) return 255; return G.g[yi * G.W + xi]; }
+function patchMedian(G, map, xmm, ymm, rmm) {
+  const v = []; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const [x, y] = map(xmm + dx * rmm, ymm + dy * rmm); v.push(lum(G, x, y)); }
+  v.sort((a, b) => a - b); return v[4];
+}
+/* Fraction of dark sample points inside a circle (mm). */
+function fillOf(G, map, cx, cy, r, thr) {
+  let dark = 0, tot = 0;
+  for (let i = -4; i <= 4; i++) for (let j = -4; j <= 4; j++) {
+    const dx = i / 4 * r, dy = j / 4 * r; if (dx * dx + dy * dy > r * r) continue;
+    const [x, y] = map(cx + dx, cy + dy); tot++; if (lum(G, x, y) < thr) dark++;
+  }
+  return dark / tot;
+}
+
+/* Read a whole sheet. n = items on the sheet. */
+function readSheet(src, n) {
+  const loc = locateSheet(src);
+  if (!loc) return { ok: false, reason: "corners" };
+  const { G, map } = loc;
+  const probes = GEO.paperProbe.map(([x, y]) => patchMedian(G, map, x, y, 0.6)).sort((a, b) => a - b);
+  const paper = probes[Math.floor(probes.length / 2)];
+  const cornerInk = CORNER_MM.map(([x, y]) => patchMedian(G, map, x, y, 0.8));
+  if (cornerInk.some(v => v > paper * 0.6)) return { ok: false, reason: "corners" };
+  const { L, centers } = bubbleCenters(n), r = L.b / 2;
+  // layout check: printed bubble outlines must be where we expect them
+  let ringDark = 0, ringTot = 0;
+  centers.forEach(row => row.forEach(([cx, cy]) => { for (let a = 0; a < 16; a++) { const [x, y] = map(cx + Math.cos(a / 8 * Math.PI) * r, cy + Math.sin(a / 8 * Math.PI) * r); ringTot++; if (lum(G, x, y) < paper * 0.72) ringDark++; } }));
+  const ringScore = ringDark / ringTot;
+  const answers = [], flagged = [], fills = [];
+  centers.forEach((row, qi) => {
+    const cy = row[0][1], above = cy - (r + (L.rowH / 2 - r) / 2), below = cy + (r + (L.rowH / 2 - r) / 2);
+    const white = Math.max(patchMedian(G, map, row[1][0], above, 0.3), patchMedian(G, map, row[2][0], below, 0.3), paper * 0.8);
+    const thr = white * 0.6;
+    const f = row.map(([cx]) => fillOf(G, map, cx, cy, r * 0.62, thr));
+    fills.push(f);
+    const order = [0, 1, 2, 3].sort((a, b) => f[b] - f[a]), top = f[order[0]], second = f[order[1]];
+    if (top >= 0.42 && second < 0.3) answers.push("ABCD"[order[0]]);
+    else if (top < 0.22) answers.push(null);                                     // blank
+    else { answers.push(null); flagged.push(qi + 1); }                           // double, light or erased
+  });
+  // CODE dots
+  const D = GEO.dots, codeBoxPaper = Math.max(patchMedian(G, map, GEO.codeBox.x + GEO.codeBox.w / 2, GEO.codeBox.y + 5.2, 0.4), paper * 0.8);
+  const bits = Array.from({ length: D.count }, (_, i) => (fillOf(G, map, D.x0 + i * D.step + D.size / 2, D.y + D.size / 2, D.size * 0.3, codeBoxPaper * 0.55) > 0.5 ? 1 : 0));
+  const code = bitsToCode(bits);
+  return { ok: true, answers, flagged, fills, code, bits, ringScore, layoutOk: ringScore > 0.35, paper, map, G, pts: loc.pts };
+}
+/* Straightened 1050 x 1485 crop (for thumbnails and the Claude backup). */
+function warpCrop(res, ppm = 5) {
+  const W = Math.round(GEO.W * ppm), H = Math.round(GEO.H * ppm);
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const ctx = c.getContext("2d"), img = ctx.createImageData(W, H), k = ppm;
+  for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) {
+    const [x, y] = res.map(u / k, v / k), L = lum(res.G, x, y), i = (v * W + u) * 4;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = L; img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0); return c;
+}
+const canvasBlob = (c, q = 0.85) => new Promise(r => c.toBlob(r, "image/jpeg", q));
+const loadImage = blob => new Promise((res, rej) => { const u = URL.createObjectURL(blob), im = new Image(); im.onload = () => { res(im); setTimeout(() => URL.revokeObjectURL(u), 1000); }; im.onerror = rej; im.src = u; });
+
+/* ===================== STORAGE (Claude db, else this browser) ===================== */
+const store = {
+  db: null, uid: null, ready: false,
+  async init() {
+    try {
+      const db = window.claude && window.claude.use ? await window.claude.use("db") : null;
+      const user = window.claude && window.claude.use ? await window.claude.use("user") : null;
+      if (db && user) { this.uid = await user.id(); this.db = db; }
+    } catch (e) { this.db = null; }
+    this.ready = true;
+  },
+  ref(k) { return this.db.collection("data/users/" + this.uid).doc(k); },
+  async get(k, fallback) {
+    try {
+      if (this.db) {
+        const snap = await this.ref(k).get();
+        const d = snap && (typeof snap.data === "function" ? snap.data() : snap.data !== undefined ? snap.data : snap);
+        if (d && typeof d.v === "string") { const v = JSON.parse(d.v); return v == null ? fallback : v; }
+        return fallback;
+      }
+      const raw = localStorage.getItem("jordynai_" + k);
+      const v = raw ? JSON.parse(raw) : null; return v == null ? fallback : v;
+    } catch (e) { return fallback; }
+  },
+  async set(k, value) {
+    try {
+      if (this.db) { await this.ref(k).set({ v: JSON.stringify(value), at: Date.now() }); return true; }
+      localStorage.setItem("jordynai_" + k, JSON.stringify(value)); return true;
+    } catch (e) { return false; }
+  },
+};
+
+/* ===================== SMALL UI ===================== */
+const Card = ({ children, className = "" }) => <div className={`glass rounded-2xl p-4 ${className}`}>{children}</div>;
+const Label = ({ children }) => <span className="block text-[11px] font-bold tracking-widest text-cyan-300/80 uppercase mb-1">{children}</span>;
+const Input = props => <input {...props} className={`w-full bg-slate-900/70 border border-white/10 rounded-lg px-3 py-2 text-slate-100 outline-none focus:ring-2 focus:ring-cyan-400 ${props.className || ""}`} />;
+const Select = ({ children, ...props }) => <select {...props} className="w-full bg-slate-900/70 border border-white/10 rounded-lg px-3 py-2 text-slate-100 outline-none focus:ring-2 focus:ring-cyan-400">{children}</select>;
+function Badge({ pct }) { const p = proficiency(pct); return <span className={`${p.color} text-white text-xs px-2 py-0.5 rounded-full whitespace-nowrap`}>{p.label}</span>; }
+function Modal({ children, onClose, wide }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3" onClick={e => e.target === e.currentTarget && onClose && onClose()}>
+      <div className={`glass-strong rounded-2xl p-5 w-full ${wide ? "max-w-4xl" : "max-w-md"} max-h-[92vh] overflow-y-auto`}>{children}</div>
+    </div>
+  );
+}
+
+/* ===================== PROFILE ONBOARDING ===================== */
+function ProfileModal({ initial, onSave, onClose }) {
+  const [p, setP] = useState({ ...initial });
+  const [confirm, setConfirm] = useState(false);
+  const region = REGIONS.find(r => r.code === p.region);
+  const divisions = region ? region.divisions : REGIONS.flatMap(r => r.divisions);
+  const ok = p.region && p.division.trim() && p.school.trim();
+  if (confirm) return (
+    <Modal>
+      <div className="text-center">
+        <div className="text-4xl mb-2">🛡️</div>
+        <h3 className="text-lg font-black text-white mb-3">Confirming all the details?</h3>
+        <div className="bg-slate-900/70 rounded-xl p-3 text-left font-mono text-sm space-y-1 mb-4">
+          <div><span className="text-cyan-300">REGION:</span> <b>{p.region}</b></div>
+          <div><span className="text-cyan-300">DIVISION:</span> <b>{p.division}</b></div>
+          <div><span className="text-cyan-300">SCHOOL:</span> <b>{p.school}</b></div>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={() => onSave({ ...p, configured: true })} className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold shadow-[0_4px_0_#065f46]">✔ Confirmed</button>
+          <button onClick={() => setConfirm(false)} className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold shadow-[0_4px_0_#7f1d1d]">✖ Edit Again</button>
+        </div>
+      </div>
+    </Modal>
+  );
+  return (
+    <Modal onClose={initial.configured ? onClose : null}>
+      <h3 className="text-lg font-black text-white">🏫 Teacher DepEd Profile</h3>
+      <p className="text-xs text-slate-400 mb-4">This goes on the header of your answer sheets. Everything is saved in CAPITAL letters.</p>
+      <div className="space-y-3">
+        <label className="block"><Label>Step 1 · Region</Label>
+          <Select value={p.region} onChange={e => setP({ ...p, region: e.target.value, division: "" })}>
+            <option value="">Select region…</option>
+            {REGIONS.map(r => <option key={r.code} value={r.code}>{r.name}</option>)}
+          </Select></label>
+        <label className="block"><Label>Step 2 · Schools Division</Label>
+          <Input list="divlist" value={p.division} placeholder="Type to search, or type your own" onChange={e => setP({ ...p, division: up(e.target.value) })} />
+          <datalist id="divlist">{divisions.map(d => <option key={d} value={d} />)}</datalist></label>
+        <label className="block"><Label>Step 3 · School Name</Label>
+          <Input value={p.school} placeholder="e.g. LEON GARCIA SR. NATIONAL HIGH SCHOOL" onChange={e => setP({ ...p, school: up(e.target.value) })} /></label>
+      </div>
+      <div className="flex gap-2 mt-5">
+        {initial.configured && <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/10 text-slate-200">Cancel</button>}
+        <button disabled={!ok} onClick={() => setConfirm(true)} className="flex-1 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold disabled:opacity-30">Save &amp; Continue</button>
+      </div>
+    </Modal>
+  );
+}
+
+/* ===================== SCANNER ===================== */
+const scanPrompt = n => `You are reading ONE photo of a printed DepEd OMR answer sheet (a quarter of an A4 page, portrait, 105 x 148.5 mm).
+Layout: four black corner squares and a school header. Top right is a box labeled "CODE" with a printed or handwritten learner code such as B-1, B-12, G-3 (B = boy, G = girl), or the words "ANSWER KEY" (the teacher's key sheet). Beside it are printed lines: Exam, Grade & Section, Subject.
+Below are ${n} numbered items, each with four bubbles A B C D, arranged in columns. Read the item numbers printed beside the bubbles.
+Older sheets may instead have a "LEARNER ID" bubble box (TYPE: BOY/GIRL/KEY, TENS 0-5, ONES 0-9); if so, build the code from it (BOY + 0 + 7 = B-7).
+If the code box is empty, read a handwritten code if any.\nPrivacy rule: do NOT read, copy or report any person's name, even if one is written on the sheet.
+If the photo shows more than one sheet, read ONLY the sheet that is most complete and centered, and say so in "note".
+
+Read only what is SHADED (filled dark). Rules:
+- An item with no shaded bubble -> null.
+- An item with two or more shaded bubbles, or a light/unclear mark -> null, and add the item number to "flagged".
+- Never guess an answer from context.
+Reply with ONLY this JSON:
+{"code":"B-12"|"G-3"|"KEY"|null,"answers":{"1":"A"|"B"|"C"|"D"|null, ... through "${n}"},"flagged":[item numbers],"note":"short note if the photo is blurry, cut off or not an answer sheet, else empty"}`;
+
+/* ===================== SHEET ALIGNER (frame = answer sheet shape 105 x 148.5 mm) ===================== */
+const SHEET_RATIO = 148.5 / 105;            // 1 : 1.414, same as one quarter-sheet
+const OUT_W = 1050, OUT_H = 1485;           // 10 px per mm crop sent to Claude
+function frameSize() {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const maxW = Math.min(vw * 0.92, 560);    // phones: almost full width; tablets: capped so it stays easy to see
+  const maxH = vh * 0.66;                   // leave room for the buttons
+  const w = Math.max(220, Math.min(maxW, maxH / SHEET_RATIO));
+  return { w: Math.round(w), h: Math.round(w * SHEET_RATIO) };
+}
+
+
+/* Find the sheet's 4 black corner squares in a photo. Returns their centers in image pixels, or null. */
+function findCorners(img) {
+  const M = 520, k = M / Math.max(img.naturalWidth, img.naturalHeight);
+  const W = Math.round(img.naturalWidth * k), H = Math.round(img.naturalHeight * k);
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0, W, H);
+  const px = ctx.getImageData(0, 0, W, H).data;
+  let sum = 0; const g = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) { g[i] = (px[i * 4] * 0.3 + px[i * 4 + 1] * 0.59 + px[i * 4 + 2] * 0.11) | 0; sum += g[i]; }
+  const thr = Math.min(90, (sum / (W * H)) * 0.45);
+  const seen = new Uint8Array(W * H), blobs = [];
+  for (let i = 0; i < W * H; i++) {
+    if (seen[i] || g[i] > thr) continue;
+    let minx = W, maxx = 0, miny = H, maxy = 0, n = 0, sx = 0, sy = 0; const st = [i]; seen[i] = 1;
+    while (st.length) {
+      const j = st.pop(), x = j % W, y = (j / W) | 0; n++; sx += x; sy += y;
+      if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
+      for (const q of [j - 1, j + 1, j - W, j + W]) if (q >= 0 && q < W * H && !seen[q] && g[q] <= thr && Math.abs((q % W) - x) <= 1) { seen[q] = 1; st.push(q); }
+    }
+    const bw = maxx - minx + 1, bh = maxy - miny + 1, area = W * H;
+    if (n > area * 0.00015 && n < area * 0.02 && bw / bh > 0.6 && bw / bh < 1.6 && n / (bw * bh) > 0.65) blobs.push({ x: sx / n, y: sy / n, n });
+  }
+  if (blobs.length < 4) return null;
+  const pickBy = f => blobs.reduce((a, b) => (f(b) > f(a) ? b : a));
+  const tl = pickBy(b => -(b.x + b.y)), br = pickBy(b => b.x + b.y), tr = pickBy(b => b.x - b.y), bl = pickBy(b => b.y - b.x);
+  const pts = [tl, tr, bl, br];
+  if (new Set(pts).size < 4) return null;
+  const wTop = Math.hypot(tr.x - tl.x, tr.y - tl.y), hLeft = Math.hypot(bl.x - tl.x, bl.y - tl.y);
+  const ratio = hLeft / wTop;                     // corner-to-corner: (148.5-13)/(105-13) ≈ 1.47
+  if (ratio < 1.25 || ratio > 1.75 || wTop < W * 0.15) return null;
+  return pts.map(p => ({ x: p.x / k, y: p.y / k }));
+}
+/* Best-fit move + turn + zoom (similarity) that puts the 4 corners on the 4 guide squares. */
+function fitCorners(img, corners, box) {
+  const g = box.w * (5 / 105), inset = box.w * (4 / 105), c0 = inset + g / 2;
+  const targets = [[c0, c0], [box.w - c0, c0], [c0, box.h - c0], [box.w - c0, box.h - c0]].map(([x, y]) => [x - box.w / 2, y - box.h / 2]);
+  const src = corners.map(p => [p.x - img.naturalWidth / 2, p.y - img.naturalHeight / 2]);
+  const ms = [0, 1].map(d => src.reduce((t, p) => t + p[d], 0) / 4), mt = [0, 1].map(d => targets.reduce((t, p) => t + p[d], 0) / 4);
+  let num1 = 0, num2 = 0, den = 0;
+  src.forEach((p, i) => { const qx = p[0] - ms[0], qy = p[1] - ms[1], X = targets[i][0] - mt[0], Y = targets[i][1] - mt[1]; num1 += qx * X + qy * Y; num2 += qx * Y - qy * X; den += qx * qx + qy * qy; });
+  const a = num1 / den, b = num2 / den;
+  return { s: Math.hypot(a, b), rot: Math.atan2(b, a) * 180 / Math.PI, tx: mt[0] - (a * ms[0] - b * ms[1]), ty: mt[1] - (b * ms[0] + a * ms[1]) };
+}
+
+function SheetAligner({ file, index, total, onDone, onSkip, onCancel }) {
+  const [url] = useState(() => URL.createObjectURL(file));
+  const [img, setImg] = useState(null);
+  const [box, setBox] = useState(frameSize());
+  const [v, setV] = useState({ s: 1, tx: 0, ty: 0, rot: 0, base: 1 });
+  const ptrs = useRef(new Map());
+  const pinch = useRef(null);
+  const [auto, setAuto] = useState(null);   // "found" | "notfound"
+  const autoAlign = (im, b = box) => { try { const cs = findCorners(im); if (cs) { const f = fitCorners(im, cs, b); const base = fit(im, 0, b).base; setV({ ...f, base }); setAuto("found"); return true; } } catch (e) {} setAuto("notfound"); return false; };
+
+  useEffect(() => () => URL.revokeObjectURL(url), [url]);
+  useEffect(() => { const on = () => setBox(frameSize()); window.addEventListener("resize", on); return () => window.removeEventListener("resize", on); }, []);
+  const fit = (im, rot, b = box) => {
+    const iw = rot % 180 ? im.naturalHeight : im.naturalWidth, ih = rot % 180 ? im.naturalWidth : im.naturalHeight;
+    const base = Math.max(b.w / iw, b.h / ih);   // cover the frame
+    return { s: base, tx: 0, ty: 0, rot, base };
+  };
+  useEffect(() => { const im = new Image(); im.onload = () => { setImg(im); setV(fit(im, 0)); autoAlign(im); }; im.src = url; }, [url]);
+  useEffect(() => { if (img && !autoAlign(img, box)) setV(x => fit(img, x.rot, box)); }, [box.w]);
+
+  const clampS = s => Math.max(v.base * 0.4, Math.min(v.base * 5, s));
+  const down = e => { e.currentTarget.setPointerCapture(e.pointerId); ptrs.current.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (ptrs.current.size === 2) { const [a, b] = [...ptrs.current.values()]; pinch.current = { d: Math.hypot(a.x - b.x, a.y - b.y), s: v.s }; } };
+  const move = e => {
+    const p = ptrs.current.get(e.pointerId); if (!p) return;
+    const nx = e.clientX, ny = e.clientY;
+    if (ptrs.current.size === 1) setV(x => ({ ...x, tx: x.tx + nx - p.x, ty: x.ty + ny - p.y }));
+    ptrs.current.set(e.pointerId, { x: nx, y: ny });
+    if (ptrs.current.size === 2 && pinch.current) { const [a, b] = [...ptrs.current.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); setV(x => ({ ...x, s: clampS(pinch.current.s * d / pinch.current.d) })); }
+  };
+  const up = e => { ptrs.current.delete(e.pointerId); if (ptrs.current.size < 2) pinch.current = null; };
+  const wheel = e => { e.preventDefault(); setV(x => ({ ...x, s: clampS(x.s * (e.deltaY < 0 ? 1.08 : 1 / 1.08)) })); };
+  const rotate = () => img && setV(x => ({ ...fit(img, (x.rot + 90) % 360) }));
+
+  const confirm = () => {
+    const c = document.createElement("canvas"); c.width = OUT_W; c.height = OUT_H;
+    const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, OUT_W, OUT_H);
+    const k = OUT_W / box.w;
+    ctx.translate(OUT_W / 2 + v.tx * k, OUT_H / 2 + v.ty * k); ctx.rotate(v.rot * Math.PI / 180); ctx.scale(v.s * k, v.s * k);
+    ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+    c.toBlob(b => b && onDone(b), "image/jpeg", 0.92);
+  };
+
+  // guide squares sit exactly where the sheet's black corners are: 4 mm inset, 5 mm size (of 105 mm width)
+  const g = box.w * (5 / 105), inset = box.w * (4 / 105);
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 z-[70] bg-slate-950/95 flex flex-col items-center justify-start overflow-y-auto p-3 select-none">
+      <div className="w-full max-w-xl flex items-center justify-between text-sm text-slate-200 mb-2">
+        <span>Align sheet {index + 1} of {total}</span>
+        <button onClick={onCancel} className="text-slate-400">✕ Cancel</button>
+      </div>
+      {auto === "found" && <p className="text-xs text-emerald-300 mb-1 text-center">✔ Corners found automatically. Check that the 4 black corners sit on the guides, then tap Use this sheet.</p>}
+      {auto === "notfound" && <p className="text-xs text-amber-300 mb-1 text-center">Couldn't find the 4 corners automatically. Align by hand (or retake with all 4 corners visible).</p>}
+      <p className="text-xs text-cyan-200 mb-2 text-center max-w-xl">Drag to move · pinch (or scroll) to zoom · put the sheet's <b>4 black corners</b> on the 4 white guide squares.</p>
+      <div className="relative overflow-hidden rounded-lg bg-black touch-none shadow-2xl ring-2 ring-cyan-400" style={{ width: box.w, height: box.h }}
+        onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onWheel={wheel}>
+        {img && <img src={url} alt="sheet" draggable="false" className="absolute left-1/2 top-1/2 max-w-none pointer-events-none"
+          style={{ width: img.naturalWidth, height: img.naturalHeight, transform: `translate(-50%,-50%) translate(${v.tx}px,${v.ty}px) rotate(${v.rot}deg) scale(${v.s})`, transformOrigin: "center" }} />}
+        {!img && <p className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm">Loading photo…</p>}
+        {[["left", "top"], ["right", "top"], ["left", "bottom"], ["right", "bottom"]].map(([x, y]) =>
+          <span key={x + y} className="absolute pointer-events-none border-2 border-white shadow-[0_0_0_2px_rgba(6,182,212,.9)]" style={{ [x]: inset, [y]: inset, width: g, height: g }} />)}
+        <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "linear-gradient(rgba(34,211,238,.18) 1px, transparent 1px), linear-gradient(90deg, rgba(34,211,238,.18) 1px, transparent 1px)", backgroundSize: `${box.w / 3}px ${box.h / 3}px` }} />
+      </div>
+      <div className="w-full max-w-xl mt-3 flex items-center gap-2">
+        <span className="text-xs text-slate-400">Zoom</span>
+        <input type="range" min={v.base * 0.4} max={v.base * 5} step={v.base / 100} value={v.s} onChange={e => setV(x => ({ ...x, s: +e.target.value }))} className="flex-1 accent-cyan-400" />
+        <button onClick={rotate} className="px-3 py-1.5 text-xs rounded-lg bg-white/10">⟳ Rotate</button>
+        <button onClick={() => img && autoAlign(img)} className="px-3 py-1.5 text-xs rounded-lg bg-emerald-500/20 text-emerald-200">Auto</button>
+        <button onClick={() => img && setV(fit(img, v.rot))} className="px-3 py-1.5 text-xs rounded-lg bg-white/10">Reset</button>
+      </div>
+      <div className="w-full max-w-xl mt-3 grid grid-cols-2 gap-2">
+        <button onClick={onSkip} className="py-3 rounded-xl bg-white/10 text-sm font-bold">Use whole photo</button>
+        <button disabled={!img} onClick={confirm} className="py-3 rounded-xl bg-cyan-500 text-slate-950 text-sm font-black disabled:opacity-30">✔ Use this sheet</button>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+/* ===================== LIVE CAMERA (auto-capture when the 4 corners are steady) ===================== */
+function LiveScanner({ n, onResult, onClose }) {
+  const videoRef = useRef(null), streamRef = useRef(null);
+  const [status, setStatus] = useState("Starting camera…");
+  const [err, setErr] = useState("");
+  const [count, setCount] = useState(0);
+  const [flash, setFlashOn] = useState(false);
+  const [box, setBox] = useState(frameSize());
+  const state = useRef({ hist: [], lastCode: null, cooldownUntil: 0, needGone: false, gone: 0 });
+
+  useEffect(() => {
+    let alive = true, timer = null;
+    (async () => {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no camera API");
+        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false });
+        if (!alive) { s.getTracks().forEach(t => t.stop()); return; }
+        streamRef.current = s; const v = videoRef.current; v.srcObject = s; await v.play();
+        setStatus("Show ONE sheet inside the frame, with all 4 black corners visible.");
+        timer = setInterval(tick, 280);
+      } catch (e) {
+        setErr("The live camera isn't available here. It works on the website version of the app (opened in Chrome or Safari). In the Claude app, use 📸 Take photo instead.");
+      }
+    })();
+    const onResize = () => setBox(frameSize()); window.addEventListener("resize", onResize);
+    return () => { alive = false; clearInterval(timer); window.removeEventListener("resize", onResize); if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop()); };
+  }, []);
+
+  const capture = (manual) => {
+    const v = videoRef.current; if (!v || !v.videoWidth) return;
+    const c = document.createElement("canvas"); c.width = v.videoWidth; c.height = v.videoHeight;
+    c.getContext("2d").drawImage(v, 0, 0);
+    const res = readSheet(c, n);
+    if (!res.ok) { if (manual) setStatus("Couldn't find the 4 black corners. Move closer and hold steady."); return false; }
+    const st = state.current;
+    if (!manual && res.code && res.code === st.lastCode) { st.needGone = true; return false; }   // same sheet still in view
+    st.lastCode = res.code; st.cooldownUntil = Date.now() + 1300; st.needGone = !res.code; st.gone = 0; st.hist = [];
+    try { navigator.vibrate && navigator.vibrate(70); } catch (e) {}
+    setFlashOn(true); setTimeout(() => setFlashOn(false), 180);
+    setCount(x => x + 1);
+    setStatus(res.code ? `✔ ${res.code} captured. Next sheet!` : "✔ Captured (no code dots: you'll type the code). Next sheet!");
+    onResult(res, "live camera");
+    return true;
+  };
+
+  const tick = () => {
+    const v = videoRef.current, st = state.current; if (!v || !v.videoWidth) return;
+    const small = toGray(v, 480), cc = coarseCorners(small);
+    if (!cc) { st.hist = []; st.gone++; if (st.gone >= 2) { st.needGone = false; st.lastCode = null; } if (Date.now() > st.cooldownUntil) setStatus("Show ONE sheet inside the frame, with all 4 black corners visible."); return; }
+    st.gone = 0;
+    if (Date.now() < st.cooldownUntil || st.needGone) return;
+    const p = cc.pts, w = small.W;
+    st.hist.push(p); if (st.hist.length > 3) st.hist.shift();
+    if (st.hist.length < 3) { setStatus("Corners found. Hold still…"); return; }
+    const moved = Math.max(...st.hist[0].map((q, i) => Math.hypot(q.x - st.hist[2][i].x, q.y - st.hist[2][i].y))) / w;
+    if (moved < 0.015) capture(false); else setStatus("Hold still…");
+  };
+
+  const g = box.w * (5 / 105), inset = box.w * (4 / 105);
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 z-[80] bg-black flex flex-col">
+      <video ref={videoRef} playsInline muted className="absolute inset-0 w-full h-full object-cover" />
+      {flash && <div className="absolute inset-0 bg-white/70 pointer-events-none" />}
+      <div className="relative z-10 flex items-center justify-between p-3 text-white text-sm bg-gradient-to-b from-black/70 to-transparent">
+        <span>🎥 Live scan · <b>{count}</b> captured</span>
+        <button onClick={onClose} className="px-3 py-1.5 rounded-lg bg-white/15 font-bold">Done</button>
+      </div>
+      <div className="relative z-10 flex-1 flex items-center justify-center pointer-events-none">
+        <div className="relative rounded-md ring-2 ring-cyan-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" style={{ width: box.w, height: box.h }}>
+          {[["left", "top"], ["right", "top"], ["left", "bottom"], ["right", "bottom"]].map(([x, y]) =>
+            <span key={x + y} className="absolute border-2 border-white" style={{ [x]: inset, [y]: inset, width: g, height: g }} />)}
+        </div>
+      </div>
+      <div className="relative z-10 p-3 pb-5 text-center bg-gradient-to-t from-black/80 to-transparent">
+        {err ? <p className="text-amber-300 text-sm mb-3">{err}</p> : <p className="text-white text-sm mb-3">{status}</p>}
+        {!err && <button onClick={() => capture(true)} className="w-16 h-16 rounded-full bg-white border-4 border-cyan-400 shadow-lg" aria-label="Capture now" />}
+        <p className="text-[11px] text-slate-300 mt-2">It captures by itself when the sheet is steady. Put the next sheet in front and it continues.</p>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+/* ===================== SCANNER PANEL ===================== */
+function ScanPanel({ onStudent, onKey, n, hasKey }) {
+  const [sample, setSample] = useState(undefined);
+  const [imgOK, setImgOK] = useState(false);
+  const [items, setItems] = useState([]);   // {id, thumb, status: done|review|align|error, code, answers, flagged, msg, cropBlob, blob}
+  const [aligning, setAligning] = useState(null);
+  const [live, setLive] = useState(false);
+  const [busyId, setBusyId] = useState("");
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const s = window.claude && window.claude.use ? await window.claude.use("sample") : null;
+      if (!alive) return;
+      setSample(() => s);   // s is a function: wrap it, or React would call it as an updater
+      if (s) { const lim = await s.limits().catch(() => null); if (alive) setImgOK(!!(lim && lim.images)); }
+    })();
+    return () => { alive = false; };
+  }, []);
+  const claudeOK = !!sample && imgOK;
+  const patch = (id, p) => setItems(list => list.map(it => (it.id === id ? { ...it, ...p } : it)));
+
+  const commit = (it, code, answers) => {
+    const c = up(code).replace(/\s/g, "");
+    if (c === "KEY") {
+      if (answers.some(a => !a)) return "The answer key has blank items. Fill every item first.";
+      onKey(answers.slice()); return "";
+    }
+    const m = c.match(/^([BG])-?(\d{1,2})$/); if (!m) return "Type a code like B-12 or G-3.";
+    const id = `${m[1]}-${+m[2]}`, responses = {};
+    answers.forEach((a, i) => { responses[i + 1] = a || ""; });
+    onStudent({ student_id: id, student_name: "", responses }); return "";
+  };
+
+  const handleResult = async (res, name, blob) => {
+    const id = Math.random().toString(36).slice(2);
+    if (!res.ok) { setItems(l => [{ id, status: "align", msg: "Couldn't find the 4 black corners.", blob, name }, ...l]); return; }
+    const crop = warpCrop(res, 5), thumb = crop.toDataURL("image/jpeg", 0.6), cropBlob = await canvasBlob(warpCrop(res, 8));
+    if (!res.layoutOk) { setItems(l => [{ id, status: "error", thumb, cropBlob, blob, name, code: res.code || "", answers: Array(n).fill(null), flagged: [], msg: `This sheet doesn't match ${n} items. Was it printed for a different number of items? Reprint, or use Ask Claude.` }, ...l]); return; }
+    const item = { id, thumb, cropBlob, blob, name, code: res.code || "", answers: res.answers.slice(), flagged: res.flagged.slice() };
+    const keyBlanks = res.code === "KEY" && res.answers.some(a => !a);
+    if (res.code && !res.flagged.length && !keyBlanks) {
+      const e = commit(item, res.code, res.answers);
+      setItems(l => [{ ...item, status: e ? "review" : "done", msg: e }, ...l]);
+    } else {
+      const why = [!res.code && "no code found: type it", res.flagged.length && `${res.flagged.length} item(s) to check`, keyBlanks && "key has blanks"].filter(Boolean).join(" · ");
+      setItems(l => [{ ...item, status: "review", msg: why }, ...l]);
+    }
+  };
+
+  const fromFile = async (file, alignedBlob) => {
+    try { const img = await loadImage(alignedBlob || file); handleResult(readSheet(img, n), file.name || "photo", file); }
+    catch (e) { setItems(l => [{ id: Math.random().toString(36).slice(2), status: "error", msg: "This file isn't a readable photo." }, ...l]); }
+  };
+
+  const askClaude = async it => {
+    setBusyId(it.id);
+    try {
+      const r = await sample.json(scanPrompt(n), { images: [it.cropBlob || it.blob], cache: false });
+      const ans = r.answers || {}, merged = it.answers.map((a, i) => (it.flagged.includes(i + 1) || !a || it.status === "error" ? (ans[i + 1] || ans[String(i + 1)] || a || null) : a));
+      const stillFlag = (r.flagged || []).map(Number).filter(q => q >= 1 && q <= n);
+      const code = it.code || up(r.code || "").replace("ANSWERKEY", "KEY");
+      patch(it.id, { answers: merged, flagged: stillFlag, code, status: "review", msg: `Claude's reading filled in. Check it, then tap Save.${r.note ? " Note: " + r.note : ""}` });
+    } catch (e) {
+      patch(it.id, { msg: { not_granted: "Claude access was not allowed.", rate_limited: "Claude usage limit reached; fix it by hand." }[e.code] || "Claude couldn't read it; fix it by hand." });
+    }
+    setBusyId("");
+  };
+
+  const done = items.filter(i => i.status === "done").length, toReview = items.filter(i => i.status !== "done").length;
+  return (
+    <Card className="border-cyan-400/30">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+        <h2 className="font-black text-white text-lg">📷 Scanner · free on-device reader</h2>
+        <span className="text-xs text-slate-400">{n} items · {hasKey ? "key saved ✔" : "scan or save the KEY first"}</span>
+      </div>
+      <p className="text-xs text-slate-400 mb-3">Sheets are read on this device in under a second: free, offline and private (photos never leave the phone).{claudeOK ? " Claude is only a backup for unclear sheets." : ""}</p>
+      <div className="grid sm:grid-cols-3 gap-2">
+        <button onClick={() => setLive(true)} className="py-3 rounded-xl bg-cyan-500 text-slate-950 font-black">🎥 Live camera (auto)</button>
+        <label className="py-3 rounded-xl bg-white/10 hover:bg-white/15 font-bold text-center cursor-pointer">📸 Take photo
+          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { Array.from(e.target.files || []).forEach(f => fromFile(f)); e.target.value = ""; }} /></label>
+        <label className="py-3 rounded-xl bg-white/10 hover:bg-white/15 font-bold text-center cursor-pointer">🖼️ Choose photos
+          <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={e => { Array.from(e.target.files || []).forEach(f => fromFile(f)); e.target.value = ""; }} /></label>
+      </div>
+      <p className="text-[11px] text-slate-500 mt-2">Tip: scan the ANSWER KEY sheet first. One sheet per photo, flat, good light, all 4 black corners visible.</p>
+
+      {items.length > 0 && <p className="text-sm text-slate-300 mt-4 mb-2">✔ {done} saved{toReview ? ` · ⚠ ${toReview} need your check` : ""}</p>}
+      <div className="space-y-2">
+        {items.map(it => (
+          <div key={it.id} className={`flex gap-3 rounded-xl p-2 border ${it.status === "done" ? "border-emerald-400/30 bg-emerald-500/5" : it.status === "review" ? "border-amber-400/40 bg-amber-500/5" : "border-red-400/40 bg-red-500/5"}`}>
+            {it.thumb ? <img src={it.thumb} alt="" className="w-14 rounded bg-white shrink-0 self-start" style={{ aspectRatio: "1/1.414" }} /> : <div className="w-14 shrink-0 rounded bg-slate-800 text-[10px] text-slate-500 flex items-center justify-center" style={{ aspectRatio: "1/1.414" }}>no sheet</div>}
+            <div className="flex-1 min-w-0 text-sm">
+              {it.status === "done" && <p className="text-emerald-300 font-bold">✔ {it.code === "KEY" ? "ANSWER KEY saved" : `${it.code} saved`} · {it.answers.filter(Boolean).length}/{n} answered</p>}
+              {it.status !== "done" && <>
+                <p className={`${it.status === "review" ? "text-amber-200" : "text-red-300"} text-xs mb-1`}>{it.msg}</p>
+                {it.status === "align" && <button onClick={() => setAligning(it)} className="px-3 py-1.5 text-xs rounded-lg bg-cyan-500 text-slate-950 font-bold">Align by hand</button>}
+                {(it.status === "review" || it.status === "error") && <>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs text-slate-400">Code</span>
+                    <input value={it.code} onChange={e => patch(it.id, { code: up(e.target.value) })} placeholder="B-12" className="w-24 bg-slate-900/70 border border-white/15 rounded px-2 py-1 text-xs font-mono text-white" />
+                  </div>
+                  {it.flagged.length > 0 && <div className="flex flex-wrap gap-x-3 gap-y-1 mb-1">
+                    {it.flagged.map(q => <span key={q} className="flex items-center gap-1 text-xs"><b className="text-amber-200 w-6 text-right">{q}</b>
+                      {["A", "B", "C", "D", ""].map(l => <button key={l || "x"} onClick={() => patch(it.id, { answers: it.answers.map((a, i) => (i === q - 1 ? (l || null) : a)) })}
+                        className={`w-5 h-5 rounded-full text-[9px] font-bold border ${(it.answers[q - 1] || "") === l ? "bg-cyan-400 text-slate-950 border-cyan-300" : "border-white/25 text-slate-300"}`}>{l || "–"}</button>)}</span>)}
+                  </div>}
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {it.status === "review" && <button onClick={() => { const e = commit(it, it.code, it.answers); if (e) patch(it.id, { msg: e }); else patch(it.id, { status: "done", code: up(it.code), msg: "" }); }} className="px-3 py-1.5 text-xs rounded-lg bg-emerald-500 text-slate-950 font-bold">Save</button>}
+                    {claudeOK && <button disabled={busyId === it.id} onClick={() => askClaude(it)} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 disabled:opacity-40">{busyId === it.id ? "Asking Claude…" : "Ask Claude"}</button>}
+                    <button onClick={() => setItems(l => l.filter(x => x.id !== it.id))} className="px-3 py-1.5 text-xs rounded-lg bg-white/5 text-slate-400">Remove</button>
+                  </div>
+                  {it.flagged.length > 0 && <p className="text-[10px] text-slate-500 mt-1">Look at the paper for these items (double, light or erased marks) and tap the right letter, or – for blank.</p>}
+                </>}
+              </>}
+            </div>
+          </div>))}
+      </div>
+      {live && <LiveScanner n={n} onClose={() => setLive(false)} onResult={res => handleResult(res, "live camera", null)} />}
+      {aligning && <SheetAligner file={aligning.blob} index={0} total={1}
+        onDone={async b => { const it = aligning; setAligning(null); setItems(l => l.filter(x => x.id !== it.id)); fromFile(it.blob, b); }}
+        onSkip={() => setAligning(null)} onCancel={() => setAligning(null)} />}
+    </Card>
+  );
+}
+
+/* ===================== CLASS ROSTER (masterlist) ===================== */
+const ROSTER_ROWS = 50;
+const rosterKey = label => "roster_" + String(label).replace(/[^\w]+/g, "_");
+const sectionOf = label => String(label).split(" – ").slice(1).join(" – ") || label;
+/* One pasted line -> a learner name. Handles "1. DELA CRUZ, JUAN", "B1  DELA CRUZ, JUAN", Excel rows with tabs (LRN, No., Name…). */
+function cleanName(line) {
+  let cells = String(line).split("\t").map(c => c.trim()).filter(Boolean);
+  if (!cells.length) return "";
+  // Excel row: keep the cells that have letters (drop numbers / LRN / sex columns), prefer the one with a comma
+  const lettered = cells.filter(c => /[A-Za-zÑñ]{2,}/.test(c) && !/^(M|F|MALE|FEMALE)$/i.test(c));
+  let name = lettered.find(c => c.includes(",")) || lettered.join(" ") || "";
+  name = name.replace(/^\s*(?:[BG]\s*-?\s*)?\d+\s*[.)\-:]?\s+/i, "");   // leading "1." "B1" "B-1 " numbering
+  name = name.replace(/\s+/g, " ").trim();
+  return up(name);
+}
+const parseNames = text => String(text || "").split(/\r?\n/).map(cleanName).filter(Boolean);
+
+/* "LAST, GIVEN, MIDDLE" -> "LAST, GIVEN M." (full middle name becomes its initial) */
+function toMiddleInitial(name) {
+  const m = String(name).match(/^([^,]+),\s*([^,]+),\s*(.+)$/);
+  if (!m) return name;
+  const mid = m[3].trim();
+  const initial = mid[0];
+  return `${m[1].trim()}, ${m[2].trim()} ${initial ? initial.toUpperCase() + "." : ""}`.trim();
+}
+const collator = new Intl.Collator("es", { sensitivity: "base" });   /* Spanish order puts Ñ after N, as in Filipino class records */
+const lastNameOf = nm => String(nm).split(",")[0].trim();
+const compareNames = (a, b) => collator.compare(lastNameOf(a), lastNameOf(b)) || collator.compare(a, b);
+/* Rows that break A–Z order or leave a gap between names -> Set of row indexes */
+function orderProblems(arr) {
+  const bad = new Set(); let lastIdx = -1;
+  const lastFilled = arr.reduce((m, v, i) => (v ? i : m), -1);
+  arr.forEach((v, i) => {
+    if (!v) { if (i < lastFilled) bad.add(i); return; }
+    if (lastIdx >= 0 && compareNames(arr[lastIdx], v) > 0) { bad.add(lastIdx); bad.add(i); }
+    lastIdx = i;
+  });
+  return bad;
+}
+
+function RosterPage({ label, initial, onSave, onBack, onDownload, onCodeList, flash }) {
+  const blank = () => Array(ROSTER_ROWS).fill("");
+  const fit = arr => { const a = blank(); (arr || []).slice(0, ROSTER_ROWS).forEach((v, i) => { a[i] = v || ""; }); return a; };
+  const [boys, setBoys] = useState(fit(initial && initial.boys));
+  const [girls, setGirls] = useState(fit(initial && initial.girls));
+  const [paste, setPaste] = useState({ B: "", G: "" });
+  const [dirty, setDirty] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [bad, setBad] = useState({ B: new Set(), G: new Set() });
+  const [saved, setSaved] = useState(!!(initial && (initial.boys || []).some(Boolean)));
+  const [grade, sec] = [String(label).split(" – ")[0], sectionOf(label)];
+  const saveLabel = `Save Learners in ${grade} – Section ${sec}`;
+
+  const set = (g, arr) => { (g === "B" ? setBoys : setGirls)(arr); setDirty(true); setSaved(false); setBad(b => ({ ...b, [g]: new Set() })); };
+  const applyPaste = (g, startAt = 0, text) => {
+    const names = parseNames(text != null ? text : paste[g]).map(toMiddleInitial);
+    if (!names.length) return flash("Nothing to paste. Copy the names from your class record first.");
+    const arr = (g === "B" ? boys : girls).slice();
+    const extra = Math.max(0, startAt + names.length - ROSTER_ROWS);
+    names.slice(0, ROSTER_ROWS - startAt).forEach((nm, k) => { arr[startAt + k] = nm; });
+    set(g, arr); if (text == null) setPaste({ ...paste, [g]: "" });
+    flash(`${Math.min(names.length, ROSTER_ROWS - startAt)} ${g === "B" ? "boys" : "girls"} filled from ${g}-${startAt + 1}.` + (extra ? ` ${extra} name(s) did not fit (max ${ROSTER_ROWS}).` : ""));
+  };
+  const sortAZ = g => { const arr = (g === "B" ? boys : girls).filter(Boolean).sort(compareNames); set(g, fit(arr)); flash(`${g === "B" ? "Boys" : "Girls"} sorted A–Z by last name. Codes renumbered.`); };
+  const count = arr => arr.filter(Boolean).length;
+
+  const trySave = () => {
+    setChecking(true);
+    setTimeout(async () => {
+      const b = orderProblems(boys), gl = orderProblems(girls);
+      setBad({ B: b, G: gl }); setChecking(false);
+      if (b.size || gl.size) { flash("Some names are not in A–Z order by last name (shown in red). Fix them or tap Sort A–Z."); return; }
+      const ok = await onSave({ boys: boys.map(x => x.trim()), girls: girls.map(x => x.trim()) });
+      if (ok) { setDirty(false); setSaved(true); }
+    }, 3000);
+  };
+
+  const Col = ({ g, arr, tone, title }) => (
+    <div className="glass rounded-2xl p-3">
+      <div className={`flex items-center justify-between px-3 py-2 rounded-xl text-white mb-3 ${tone}`}>
+        <h3 className="font-black">{title}</h3><span className="text-sm">{count(arr)} enrolled</span>
+      </div>
+      <Label>Paste {g === "B" ? "boys" : "girls"} here (one per line: LAST NAME, Given Name, Middle Initial)</Label>
+      <textarea value={paste[g]} onChange={e => setPaste({ ...paste, [g]: e.target.value })} placeholder={g === "B" ? "ABADIA, KRISTOPHER RYAN N.\nACLA, DAMIAN JAY D.\n…" : "AMOR, MARIA CLARA S.\nBAUTISTA, ANA L.\n…"}
+        className="w-full min-h-[6rem] font-mono text-xs bg-slate-950/70 border border-white/10 rounded-lg p-2 text-slate-200" />
+      <div className="flex flex-wrap gap-2 mt-1 mb-2">
+        <button onClick={() => applyPaste(g)} className="px-3 py-1.5 text-xs rounded-lg bg-cyan-500 text-slate-950 font-bold">Fill {g}-1 to {g}-{ROSTER_ROWS}</button>
+        {bad[g].size > 0 && <button onClick={() => sortAZ(g)} className="px-3 py-1.5 text-xs rounded-lg bg-red-500 text-white font-bold">🔤 Sort A–Z for me</button>}
+        <button onClick={() => set(g, blank())} className="px-3 py-1.5 text-xs rounded-lg bg-white/10">Clear column</button>
+      </div>
+      {bad[g].size > 0 && <p className="text-xs text-red-300 mb-2">Red rows are out of A–Z order by last name (or empty rows between names). Move them, or tap Sort A–Z.</p>}
+      <div className="max-h-[60vh] overflow-y-auto pr-1 space-y-1">
+        {arr.map((v, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <span className="w-12 shrink-0 text-center font-mono text-xs font-bold text-cyan-200 bg-slate-950/70 border border-white/10 rounded py-1 select-none">{g}-{i + 1}</span>
+            <input value={v} onChange={e => { const a = arr.slice(); a[i] = up(e.target.value); set(g, a); }}
+              onBlur={e => { const t = toMiddleInitial(e.target.value.trim()); if (t !== v) { const a = arr.slice(); a[i] = t; set(g, a); } }}
+              onPaste={e => { const t = e.clipboardData.getData("text"); if (/\n/.test(t.trim())) { e.preventDefault(); applyPaste(g, i, t); } }}
+              placeholder={i === 0 ? "LAST NAME, Given Name M." : ""}
+              className={`flex-1 border rounded px-2 py-1 text-xs text-slate-100 outline-none focus:ring-1 focus:ring-cyan-400 ${bad[g].has(i) ? "bg-red-600/40 border-red-400" : "bg-slate-900/70 border-white/10"}`} />
+          </div>))}
+      </div>
+    </div>
+  );
+
+  const total = count(boys) + count(girls);
+  return (
+    <div className="space-y-4">
+      <Card>
+        <button onClick={() => { if (!dirty || window.__leaveOK) onBack(); else { window.__leaveOK = true; flash("You have unsaved names. Tap Back again to leave without saving."); setTimeout(() => { window.__leaveOK = false; }, 4000); } }} className="text-xs text-cyan-300 mb-1">← Back to Class Setup</button>
+        <h2 className="font-black text-white text-xl">👥 Learners of {label}</h2>
+        <ol className="text-sm text-slate-300 list-decimal ml-5 mt-3 space-y-1">
+          <li>Open your <b>class record</b> or <b>masterlist</b> of officially enrolled learners for this section.</li>
+          <li>Write names as <b>LAST NAME, Given Name, Middle Initial</b> (example: <span className="font-mono">ABADIA, KRISTOPHER RYAN N.</span>). A full middle name is changed to its initial automatically.</li>
+          <li>Names must be in <b>alphabetical order by last name</b>, because the order gives each learner a permanent code: 1st boy = <b>B-1</b>, 2nd = <b>B-2</b>… The same goes for girls (<b>G-1</b>…).</li>
+          <li>Paste the boys in <b>BOYS</b> (left) and the girls in <b>GIRLS</b> (right), press <b>Fill</b>, check the names, then press <b>{saveLabel}</b>.</li>
+        </ol>
+        <p className="text-xs text-emerald-200 bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-2 mt-3">🔒 Privacy (DO 15, s. 2026): learner names are saved <b>only on this device</b>. They are never sent to Claude. Answer sheets print only the CODE, so Claude only ever sees codes like B-7.</p>
+        <p className="text-[11px] text-slate-500 mt-2">Codes like B-1 are fixed and can't be edited. Numbers, codes, LRNs and extra Excel columns are removed when you paste. Pasting many names into one row fills downward from there.</p>
+        <div className="flex flex-wrap items-center gap-3 mt-4">
+          <button disabled={checking || total === 0} onClick={trySave} className="px-5 py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold disabled:opacity-40">
+            {checking ? "⏳ Checking alphabetical order…" : `💾 ${saveLabel} (${total})`}</button>
+          {saved && !dirty && <span className="text-sm text-emerald-300">✔ Saved: {count(boys)} boys, {count(girls)} girls</span>}
+        </div>
+        {saved && !dirty && total > 0 && (
+          <div className="mt-4 rounded-xl border border-amber-400/40 bg-amber-400/10 p-3">
+            <p className="text-sm text-amber-100 mb-2">📄 Download named answer sheets: <b>{count(boys)} boys + {count(girls)} girls + 1 ANSWER KEY = {total + 1} sheets</b> on {Math.ceil((total + 1) / 4)} A4 page(s). Each sheet shows the learner's CODE, grade & section, subject and exam (no names, for privacy). Use the Code List to hand out the right sheet to each learner.</p>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => onDownload({ boys, girls }, "pdf")} className="px-4 py-2 rounded-lg bg-amber-400 text-slate-950 font-bold">⬇ Answer Sheets for {sec} (PDF)</button>
+              <button onClick={() => onDownload({ boys, girls }, "docx")} className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold">⬇ Word (.docx)</button>
+              <button onClick={() => onCodeList({ boys, girls })} className="px-4 py-2 rounded-lg bg-white/10 font-bold">📋 Download Code List (names + codes)</button>
+            </div>
+            <p className="text-[11px] text-amber-200/70 mt-1">Uses the current exam settings (subject and number of items). If you add or remove a learner later, codes after that name change, so print the sheets again.</p>
+          </div>
+        )}
+      </Card>
+      <div className="grid md:grid-cols-2 gap-4">
+        {Col({ g: "B", arr: boys, tone: "bg-blue-700/80", title: "BOYS (B-1 to B-50)" })}
+        {Col({ g: "G", arr: girls, tone: "bg-pink-600/80", title: "GIRLS (G-1 to G-50)" })}
+      </div>
+    </div>
+  );
+}
+
+function BlankPreview({ o }) {
+  const ref = useRef(null);
+  useEffect(() => { const c = ref.current; if (!c) return; const k = 2; c.width = 210 * k; c.height = 297 * k; const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); drawPage(canvasPen(ctx, k), o, blankList(1)); }, [o.n, o.subject, o.exam, o.profile.school, o.profile.region, o.profile.division]);
+  return <canvas ref={ref} className="bg-white shadow-lg" style={{ width: 300, height: 424 }} />;
+}
+
+/* ===================== APP ===================== */
+function App() {
+  const [loaded, setLoaded] = useState(false);
+  const [saveMode, setSaveMode] = useState("");
+  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [config, setConfig] = useState(DEFAULT_CONFIG);
+  const [key, setKey] = useState(Array(50).fill("A"));
+  const [keySaved, setKeySaved] = useState(false);
+  const [grade, setGrade] = useState("Grade 7");
+  const [section, setSection] = useState("");
+  const [classes, setClasses] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [rawText, setRawText] = useState("");
+  const [rawErr, setRawErr] = useState("");
+  const [passMark, setPassMark] = useState(70);
+  const [history, setHistory] = useState([]);
+  const [tab, setTab] = useState("setup");
+  const [modal, setModal] = useState(null);
+  const [shake, setShake] = useState("");
+  const [toast, setToast] = useState("");
+  const [openHist, setOpenHist] = useState(null);
+  const keyRef = useRef(null);
+  const [rosterView, setRosterView] = useState(null);
+  const [rosters, setRosters] = useState({});
+
+  const flash = m => { setToast(m); setTimeout(() => setToast(""), 2800); };
+  const subj = subjectOf(config.subject);
+  const n = config.itemCount;
+  const tags = subj.comps ? (config.tags && config.tags.length === n ? config.tags : defaultTags(n, subj.comps)) : null;
+  const compOf = i => (tags ? subj.comps[tags[i]] : "");
+  const [quick, setQuick] = useState({});
+  const setTags = async t => { const c = { ...config, tags: t }; setConfig(c); await store.set("config", c); };
+  const cycleTag = i => setTags(tags.map((t, j) => j === i ? (t + 1) % subj.comps.length : t));
+  const applyQuick = ci => {
+    const items = parseItems(quick[ci], n);
+    if (!items.length) return flash("Type item numbers like 1, 3, 6-8.");
+    setTags(tags.map((t, j) => items.includes(j + 1) ? ci : t)); flash(`${items.length} item(s) set to ${subj.comps[ci]}.`);
+  };
+  const gradeSection = `${grade} – ${section || "(no section)"}`;
+  const unlocked = profile.configured && keySaved;
+
+  /* load saved data */
+  useEffect(() => {
+    (async () => {
+      await store.init();
+      setSaveMode(store.db ? "Saved to your Claude account" : "Saved in this browser only");
+      const [p, c, k, ks, cl, h, pm] = await Promise.all([
+        store.get("profile", DEFAULT_PROFILE), store.get("config", DEFAULT_CONFIG), store.get("key", null),
+        store.get("keySaved", false), store.get("classes", []), store.get("history", []), store.get("passMarkV2", 70)]);
+      setProfile(p); setConfig(c); if (k) setKey(k); setKeySaved(!!ks); setClasses(cl || []); setHistory(h || []); setPassMark(pm || 70);
+      const rs = {};
+      for (const lbl of (cl || [])) {
+        let v = localStore.get(rosterKey(lbl), null);
+        if (!v && store.db) { const old = await store.get(rosterKey(lbl), null); if (old) { v = old; localStore.set(rosterKey(lbl), old); await store.set(rosterKey(lbl), null); } }
+        if (v) rs[lbl] = v;
+      }
+      setRosters(rs);
+      setLoaded(true);
+      if (!p.configured) setModal("profile");
+    })();
+  }, []);
+
+  const saveProfile = async p => { setProfile(p); setModal(null); await store.set("profile", p); flash("Profile saved. Your answer sheet header is updated."); };
+
+  const updateConfig = async (patch, itemsChanged) => {
+    let c = { ...config, ...patch };
+    const s = subjectOf(c.subject);
+    if (patch.slot) { c.examType = patch.slot === "TE" ? "term" : "summative"; if (c.examType !== config.examType) patch.examType = c.examType; }
+    if (!c.slot) c.slot = c.examType === "term" ? "TE" : "ST1";
+    if (c.examType === "summative" && s.termOnly) c.subject = "mapeh-music-arts";
+    if (patch.examType && !("itemCount" in patch)) { c.itemCount = c.examType === "summative" ? 25 : 50; itemsChanged = true; }
+    if (itemsChanged || patch.subject || patch.examType || !c.tags || c.tags.length !== c.itemCount) c.tags = defaultTags(c.itemCount, subjectOf(c.subject).comps);
+    setConfig(c); await store.set("config", c);
+    if (itemsChanged) {
+      const k = Array.from({ length: c.itemCount }, (_, i) => key[i] || "A");
+      setKey(k); setKeySaved(false); await store.set("key", k); await store.set("keySaved", false);
+      setModal("keyPrompt");
+    }
+  };
+
+  const saveKey = async () => {
+    await store.set("key", key); await store.set("keySaved", true);
+    setKeySaved(true); setModal("copyPrompt");
+  };
+
+  const onScannedKey = async k => {
+    const c = { ...config, itemCount: k.length };
+    if (!c.tags || c.tags.length !== k.length) c.tags = defaultTags(k.length, subjectOf(c.subject).comps);
+    setConfig(c); setKey(k); setKeySaved(true);
+    await store.set("config", c); await store.set("key", k); await store.set("keySaved", true);
+  };
+
+  const addClass = async () => {
+    if (!section.trim()) return flash("Type a section name first.");
+    const label = `${grade} – ${up(section.trim())}`;
+    if (classes.includes(label)) return flash("That class is already saved.");
+    const cl = [...classes, label]; setClasses(cl); setSection(up(section.trim())); await store.set("classes", cl); flash("Class saved.");
+  };
+  const pickClass = label => { const [g, ...s] = label.split(" – "); setGrade(g); setSection(s.join(" – ")); };
+  const saveRoster = async (label, rs) => {
+    const ok = localStore.set(rosterKey(label), rs);
+    if (ok) { setRosters(x => ({ ...x, [label]: rs })); flash(`Students of ${label} saved.`); } else flash("Saving failed. Try again.");
+    return ok;
+  };
+  const learnersOf = rs => {
+    const list = [{ code: "KEY", name: "" }];
+    rs.boys.forEach((v, i) => v && list.push({ code: `B-${i + 1}`, name: "" }));
+    rs.girls.forEach((v, i) => v && list.push({ code: `G-${i + 1}`, name: "" }));
+    return list;
+  };
+  const downloadCodeList = (label, rs) => saveFile(buildCodeListHtml(profile, label, rs), `Code_List_${String(label).replace(/[^\w]+/g, "_")}.html`, "text/html;charset=utf-8");
+  const downloadSheets = async (label, rs, kind = "pdf") => {
+    const o = { profile, gradeSection: label, subject: subj.label, exam: `${examLabel} · ${term}`, n };
+    const base = `DepEd_Answer_Sheets_${String(label).replace(/[^\w]+/g, "_")}_${n}items`;
+    try {
+      if (kind === "pdf") await saveFile(sheetsPdf(o, learnersOf(rs)), base + ".pdf", "application/pdf");
+      else await saveFile(await sheetsDocx(o, learnersOf(rs)), base + ".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    } catch (e) { flash("Couldn't make the file: " + (e.message || "try again")); }
+  };
+  const rosterCount = label => { const r = rosters[label]; return r ? r.boys.filter(Boolean).length + r.girls.filter(Boolean).length : 0; };
+  const removeClass = async label => { const cl = classes.filter(x => x !== label); setClasses(cl); await store.set("classes", cl); };
+
+  /* learners */
+  const addScanned = st => setStudents(list => [...list.filter(x => up(x.student_id) !== st.student_id), st]);
+  const loadJson = () => {
+    try {
+      const o = JSON.parse(rawText);
+      const list = Array.isArray(o) ? o : (o.students || o.studentData);
+      if (!Array.isArray(list)) throw new Error('Expected an array or { "students": [...] }');
+      setStudents(list); setRawErr(""); flash(`${list.length} learners loaded.`);
+    } catch (e) { setRawErr(e.message); }
+  };
+
+  /* grading */
+  const activeLabel = `${grade} – ${section}`;
+  const roster = rosters[activeLabel] || null;
+  const rosterName = id => { if (!roster) return ""; const g = gender(id), k = idNum(id) - 1; const list = g === "B" ? roster.boys : g === "G" ? roster.girls : null; return list && list[k] ? list[k] : ""; };
+  const data = useMemo(() => {
+    const scored = students.map(s => {
+      const src = Array.isArray(s.answers) ? s.answers
+        : (s.responses && typeof s.responses === "object") ? key.map((_, i) => s.responses[i + 1] ?? s.responses[String(i + 1)]) : [];
+      const ans = key.map((_, i) => String(src[i] || "").trim().toUpperCase());
+      const marks = key.map((k, i) => ans[i] === k);
+      const score = marks.filter(Boolean).length;
+      const pct = n ? score / n * 100 : 0;
+      return { id: up(s.id || s.student_id || "?").replace(/\s/g, ""), name: toInitials(rosterName(up(s.id || s.student_id || "")) || s.name || s.student_name), ans, marks, score, pct, pass: pct >= passMark };
+    });
+    const sorter = (a, b) => idNum(a.id) - idNum(b.id);
+    const boys = scored.filter(s => gender(s.id) === "B").sort(sorter);
+    const girls = scored.filter(s => gender(s.id) === "G").sort(sorter);
+    const other = scored.filter(s => gender(s.id) === "?");
+    const all = [...boys, ...girls, ...other];
+    const total = all.length;
+    const mean = total ? all.reduce((t, s) => t + s.score, 0) / total : 0;
+    const mps = n ? mean / n * 100 : 0;
+    const items = key.map((k, i) => {
+      const wrong = all.filter(s => !s.marks[i]).length;
+      const correct = total - wrong;
+      return { no: i + 1, key: k, wrong, correct, pctCorrect: total ? correct / total * 100 : 0, foePct: total ? wrong / total * 100 : 0 };
+    });
+    const grp = arr => { const m = arr.length ? arr.reduce((t, s) => t + s.score, 0) / arr.length : 0; return { count: arr.length, mean: m, mps: n ? m / n * 100 : 0, sd: sdOf(arr) }; };
+    const comps = [];
+    if (subj.comps && tags) {
+      subj.comps.forEach((label, ci) => {
+        const idx = tags.map((t, i) => t === ci ? i : -1).filter(i => i >= 0);
+        if (!idx.length) return;
+        const m = total ? all.reduce((t, s) => t + idx.filter(i => s.marks[i]).length, 0) / total : 0;
+        comps.push({ label, items: listItems(idx.map(i => i + 1)), count: idx.length, mean: m, mps: m / idx.length * 100 });
+      });
+    }
+    const enrolled = roster ? [...roster.boys.map((v, i) => v ? `B-${i + 1}` : null), ...roster.girls.map((v, i) => v ? `G-${i + 1}` : null)].filter(Boolean) : [];
+    const testedIds = new Set(all.map(s => s.id));
+    const missing = enrolled.filter(id => !testedIds.has(id));
+    const notEnrolled = roster ? all.filter(s => gender(s.id) !== "?" && !rosterName(s.id)).map(s => s.id) : [];
+    const scores = all.map(s => s.score);
+    const passed = all.filter(s => s.pass).length;
+    return {
+      enrolled, missing, notEnrolled, boys, girls, other, all, total, mean, mps, items, comps, passed,
+      sd: sdOf(all), bStats: grp(boys), gStats: grp(girls),
+      high: scores.length ? Math.max(...scores) : 0, low: scores.length ? Math.min(...scores) : 0,
+      critical: items.filter(i => i.foePct > 50),
+      least: items.filter(i => i.foePct <= 50 && i.pctCorrect < 75),
+      mastered: items.filter(i => i.pctCorrect >= 75),
+      passingRate: total ? passed / total * 100 : 0,
+    };
+  }, [students, key, passMark, n, subj, tags, roster]);
+
+  const slot = config.slot || (config.examType === "term" ? "TE" : "ST1");
+  const term = config.term || termNow();
+  const examLabel = SLOTS[slot];
+  const rule = itemRule(grade);
+  const itemWarn = rule ? (slot === "TE" ? (n !== rule.te ? `DO 15, s. 2026: the Term Exam for ${rule.ks} has ${rule.te} items (you set ${n}).` : "") : (n > rule.st ? `DO 15, s. 2026: a Summative Test for ${rule.ks} has at most ${rule.st} items (you set ${n}).` : "")) : "";
+
+  const buildCSV = (withInitials = true) => {
+    const q = v => `"${String(v).replace(/"/g, '""')}"`;
+    const rows = [["JordynAI DepEd Exam Report"], ["Region", profile.region], ["Schools Division", profile.division], ["School", profile.school],
+      ["Grade & Section", gradeSection], ["Term", term], ["Exam", examLabel], ["Subject", subj.label], ["Number of Items", n], [],
+      ["GRADESHEET"], ["Group", "Learner ID", "Initials", ...key.map((_, i) => `Q${i + 1}`), "Score", "Percent", "Status", "Proficiency Level"]];
+    data.all.forEach(s => rows.push([gender(s.id) === "B" ? "Boys" : gender(s.id) === "G" ? "Girls" : "Unsorted", s.id, withInitials ? s.name : "", ...s.marks.map(m => m ? 1 : 0), s.score, fmt(s.pct), s.pass ? "Passed" : "Failed", proficiency(s.pct).label]));
+    rows.push([], ["SUMMARY"], ["Total Learners", data.total], ["Boys", data.bStats.count], ["Girls", data.gStats.count],
+      ["Passing Mark (%)", passMark], ["Passed", data.passed], ["Failed", data.total - data.passed], ["Passing Rate (%)", fmt(data.passingRate)],
+      ["Class Mean", fmt(data.mean)], ["Standard Deviation", fmt(data.sd)], ["Class MPS (%)", fmt(data.mps)], ["Proficiency Level", proficiency(data.mps).label],
+      ["Boys Mean", fmt(data.bStats.mean)], ["Boys MPS (%)", fmt(data.bStats.mps)], ["Girls Mean", fmt(data.gStats.mean)], ["Girls MPS (%)", fmt(data.gStats.mps)],
+      ["Highest Score", data.high], ["Lowest Score", data.low]);
+    data.comps.forEach(c => rows.push([`${c.label} MPS (%) (${c.count} items: ${c.items})`, fmt(c.mps)]));
+    rows.push([], ["ITEM ANALYSIS"], ["Item", "Component", "Key", "Correct", "Frequency of Errors", "FOE %", "% Correct", "Remark"]);
+    data.items.forEach(i => rows.push([i.no, compOf(i.no - 1), i.key, i.correct, i.wrong, fmt(i.foePct), fmt(i.pctCorrect), i.foePct > 50 ? "Critical Competency for Review" : i.pctCorrect >= 75 ? "Mastered" : "Least Mastered"]));
+    return rows.map(r => r.map(q).join(",")).join("\r\n");
+  };
+
+  const saveFile = async (text, filename, type) => {
+    const blob = new Blob([text], { type });
+    try {
+      const dl = window.claude && window.claude.use ? await window.claude.use("downloads") : null;
+      if (dl) { await dl.save({ filename, data: blob }); flash("Saved."); return; }
+    } catch (e) { flash("Save cancelled or blocked. Use the Copy button."); return; }
+    try {
+      const url = URL.createObjectURL(blob); const a = document.createElement("a");
+      a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000); flash("Download started.");
+    } catch (e) { flash("Download blocked. Use the Copy button."); }
+  };
+  const copyText = async (t, msg) => { try { await navigator.clipboard.writeText(t); flash(msg); } catch (e) { flash("Copy blocked. Select the text and press Ctrl/Cmd+C."); } };
+  const csvName = `jordynai_report_${subj.code}_${slot}_${term.replace(" ", "")}_${gradeSection.replace(/[^\w]+/g, "_")}.csv`;
+
+  const summaryText =
+`DEPED ${examLabel.toUpperCase()} SUMMARY (SMEA)
+${profile.region} · ${profile.division}
+${profile.school}
+Grade & Section: ${gradeSection}
+Term: ${term}
+Exam: ${examLabel}
+Subject / Learning Area: ${subj.label}
+Number of Items: ${n}
+Learners Tested: ${data.total} (Boys ${data.bStats.count}, Girls ${data.gStats.count})${roster ? ` of ${data.enrolled.length} enrolled` : ""}
+
+Passing Mark: ${passMark}%   Passed: ${data.passed}   Failed: ${data.total - data.passed}   Passing Rate: ${fmt(data.passingRate)}%
+
+Class Mean: ${fmt(data.mean)}
+Standard Deviation: ${fmt(data.sd)}
+Class MPS: ${fmt(data.mps)}%
+Proficiency Level: ${proficiency(data.mps).label}
+Boys Mean / MPS: ${fmt(data.bStats.mean)} / ${fmt(data.bStats.mps)}%
+Girls Mean / MPS: ${fmt(data.gStats.mean)} / ${fmt(data.gStats.mps)}%
+${data.comps.map(c => `${c.label} (${c.count} items: ${c.items}) Mean / MPS: ${fmt(c.mean)} / ${fmt(c.mps)}%`).join("\n")}${data.comps.length ? "\n" : ""}Highest Score: ${data.high}   Lowest Score: ${data.low}
+
+Critical Competencies for Review (error rate above 50%): ${data.critical.length ? data.critical.map(i => `Q${i.no} (${fmt(i.foePct)}% wrong)`).join(", ") : "None"}
+Least Mastered Items (below 75% correct): ${data.least.length ? data.least.map(i => `Q${i.no} (FOE ${i.wrong})`).join(", ") : "None"}
+Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(i => "Q" + i.no).join(", ") : "None"}`;
+
+  const finalize = async () => {
+    const entry = {
+      id: Date.now().toString(36), at: new Date().toISOString(), gradeSection, examType: config.examType, slot, term, subject: subj.label, itemCount: n,
+      scores: Object.fromEntries(data.all.filter(x => gender(x.id) !== "?").map(x => [x.id, x.score])),
+      learners: data.total, boys: data.bStats.count, girls: data.gStats.count, mean: data.mean, sd: data.sd, mps: data.mps,
+      level: proficiency(data.mps).label, passingRate: data.passingRate, passMark, critical: data.critical.map(i => i.no),
+      comps: data.comps.map(c => ({ label: c.label, mps: c.mps })), summary: summaryText, csv: buildCSV(false), csvName,
+    };
+    const h = [entry, ...history].slice(0, 300);
+    setHistory(h); setModal(null);
+    const ok = await store.set("history", h);
+    flash(ok ? "Session finalized and saved to History." : "Finalized, but saving failed. Download the CSV to be safe.");
+    setTab("history");
+  };
+  const [exSel, setExSel] = useState({ cls: "", subject: "", term: "" });
+  const exOptions = useMemo(() => {
+    const cls = [...new Set(history.filter(h => h.scores).map(h => h.gradeSection))];
+    const subs = [...new Set(history.filter(h => h.scores && (!exSel.cls || h.gradeSection === exSel.cls)).map(h => h.subject))];
+    const terms = [...new Set(history.filter(h => h.scores).map(h => h.term).filter(Boolean))].sort();
+    return { cls, subs, terms };
+  }, [history, exSel.cls]);
+  const exData = useMemo(() => {
+    const cls = exSel.cls || exOptions.cls[0], sub = exSel.subject || exOptions.subs[0], tm = exSel.term || exOptions.terms[0];
+    if (!cls || !sub) return null;
+    const pick = sl => history.filter(h => h.scores && h.gradeSection === cls && h.subject === sub && h.term === tm && h.slot === sl).sort((a, b) => b.at.localeCompare(a.at))[0] || null;
+    const st1 = pick("ST1"), st2 = pick("ST2"), te = pick("TE");
+    const rs = rosters[cls];
+    const enrolled = rs ? [...rs.boys.map((v, i) => v ? `B-${i + 1}` : null), ...rs.girls.map((v, i) => v ? `G-${i + 1}` : null)].filter(Boolean) : [];
+    const ids = [...new Set([...enrolled, ...[st1, st2, te].filter(Boolean).flatMap(x => Object.keys(x.scores))])]
+      .sort((a, b) => (gender(a) === gender(b) ? idNum(a) - idNum(b) : gender(a) === "B" ? -1 : 1));
+    const nameOf = id => { if (!rs) return ""; const k = idNum(id) - 1; const list = gender(id) === "B" ? rs.boys : rs.girls; return list && list[k] ? toInitials(list[k]) : ""; };
+    const rows = ids.map(id => {
+      const v = x => (x && x.scores[id] != null ? x.scores[id] : null);
+      const a = v(st1), b = v(st2), c = v(te);
+      const complete = a != null && b != null && c != null;
+      const points = complete ? (a + b + c) / (st1.itemCount + st2.itemCount + te.itemCount) * 100 : null;
+      const weighted = complete ? (a / st1.itemCount * 100) * 0.30 + (b / st2.itemCount * 100) * 0.30 + (c / te.itemCount * 100) * 0.40 : null;
+      return { id, initials: nameOf(id), a, b, c, points, weighted };
+    });
+    return { cls, sub, tm, st1, st2, te, rows };
+  }, [history, exSel, exOptions, rosters]);
+  const exCSV = () => {
+    const q = v => `"${String(v).replace(/"/g, '""')}"`, d = exData;
+    const rows = [["Exams Component", d.cls, d.sub, d.tm], [], ["Code", "Initials", `ST1 (/${d.st1 ? d.st1.itemCount : "-"})`, `ST2 (/${d.st2 ? d.st2.itemCount : "-"})`, `TE (/${d.te ? d.te.itemCount : "-"})`, "A: Points %", "B: DO 15 30/30/40 %"]];
+    d.rows.forEach(r => rows.push([r.id, r.initials, r.a ?? "", r.b ?? "", r.c ?? "", r.points != null ? fmt(r.points) : "", r.weighted != null ? fmt(r.weighted) : ""]));
+    return "\uFEFF" + rows.map(r => r.map(q).join(",")).join("\r\n");
+  };
+  const deleteHist = async id => { const h = history.filter(x => x.id !== id); setHistory(h); await store.set("history", h); };
+
+  const [resetBusy, setResetBusy] = useState(false);
+  const [blankPages, setBlankPages] = useState(1);
+  const [blankBusy, setBlankBusy] = useState("");
+  const resetAll = async () => {
+    setResetBusy(true);
+    const keys = ["profile", "config", "key", "keySaved", "classes", "history", "passMark", "passMarkV2", ...classes.map(rosterKey)];
+    let ok = true;
+    for (const k of keys) { if (!(await store.set(k, null))) ok = false; }
+    try { Object.keys(localStorage).filter(k => k.startsWith("jordynai_")).forEach(k => localStorage.removeItem(k)); } catch (e) {}
+    setProfile(DEFAULT_PROFILE); setConfig(DEFAULT_CONFIG); setKey(Array(50).fill("A")); setKeySaved(false);
+    setClasses([]); setRosters({}); setHistory([]); setPassMark(70); setStudents([]); setRawText("");
+    setGrade("Grade 7"); setSection(""); setRosterView(null); setOpenHist(null); setTab("setup");
+    setResetBusy(false); setModal("profile");
+    flash(ok ? "All data erased. Set up your school profile to start again." : "Data cleared here, but some saved items could not be erased. Try Reset again.");
+  };
+  const resetExam = async () => {
+    setStudents([]); setRawText(""); setKey(Array(config.itemCount).fill("A")); setKeySaved(false);
+    await store.set("key", Array(config.itemCount).fill("A")); await store.set("keySaved", false);
+    setModal(null); setTab("setup"); flash("Cleared. Set up the next exam.");
+  };
+
+  const goTab = t => {
+    if (t !== "setup" && !unlocked) { setShake(t); setTimeout(() => setShake(""), 600); flash(!profile.configured ? "Finish your school profile first." : "Save the Answer Key first to unlock this tab."); return; }
+    setTab(t);
+  };
+
+  const TABS = [["setup", "⚙️ Class Setup"], ["scan", "📷 Scanner"], ["grades", "📋 Gradesheet"], ["chart", "📊 Item Analysis"], ["summary", "🧾 Summary & CSV"], ["history", "🗂️ History"]];
+
+  /* ---------- tables ---------- */
+  const GradeTable = ({ title, rows, stats, tone }) => (
+    <div className="mb-6">
+      <div className={`flex flex-wrap items-center justify-between gap-1 px-3 py-2 rounded-t-xl text-white ${tone}`}>
+        <h3 className="font-bold">{title}</h3>
+        <span className="text-sm">{stats.count} learners · Mean {fmt(stats.mean)} · MPS {fmt(stats.mps)}%</span>
+      </div>
+      <div className="overflow-x-auto border border-white/10 border-t-0 rounded-b-xl bg-slate-900/50">
+        <table className="w-full text-sm">
+          <thead className="bg-white/5 text-slate-300"><tr>
+            <th className="p-2 text-left">ID</th><th className="p-2 text-left">Initials</th>
+            {key.map((_, i) => <th key={i} className="p-1 text-center w-7 font-mono text-xs">{i + 1}</th>)}
+            <th className="p-2">Score</th><th className="p-2">%</th><th className="p-2">Status</th><th className="p-2 text-left">Level</th>
+          </tr></thead>
+          <tbody>
+            {rows.length === 0 && <tr><td colSpan={key.length + 6} className="p-3 text-center text-slate-500">No learners</td></tr>}
+            {rows.map(s => (
+              <tr key={s.id} className="border-t border-white/5">
+                <td className="p-2 font-mono font-bold text-cyan-200">{s.id}</td><td className="p-2">{s.name}</td>
+                {s.marks.map((m, i) => <td key={i} title={`Answer: ${s.ans[i] || "-"}`} className={`p-1 text-center font-mono ${m ? "text-emerald-400" : "text-red-300 bg-red-500/10"}`}>{m ? "✓" : (s.ans[i] || "–")}</td>)}
+                <td className="p-2 text-center font-bold">{s.score}/{n}</td><td className="p-2 text-center">{fmt(s.pct)}</td>
+                <td className="p-2 text-center"><span className={`text-xs font-bold px-2 py-0.5 rounded ${s.pass ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"}`}>{s.pass ? "PASSED" : "FAILED"}</span></td>
+                <td className="p-2"><Badge pct={s.pct} /></td>
+              </tr>))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  if (!loaded) return <div className="min-h-screen flex items-center justify-center text-cyan-300">Loading JordynAI…</div>;
+
+  return (
+    <div className="min-h-screen">
+      {/* HEADER */}
+      <header className="sticky top-0 z-40 bg-slate-950/70 backdrop-blur-xl border-b border-white/10">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center gap-3 justify-between">
+          <div>
+            <h1 className="text-xl font-black text-white">Jordyn<span className="text-cyan-400">AI</span> Exam Analyzer</h1>
+            <p className="text-[11px] text-slate-400 font-mono">{profile.configured ? `${profile.region} · ${profile.division} · ${profile.school}` : "Set up your school profile"}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => setModal("profile")} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 hover:bg-white/15">🏫 Edit Profile / School</button>
+            <button disabled={!unlocked} onClick={() => setModal("copyAS")} className="px-3 py-1.5 text-xs rounded-lg bg-amber-400 text-slate-950 font-bold disabled:opacity-30">📄 Copy A/S</button>
+          </div>
+        </div>
+      </header>
+
+      <div className="max-w-6xl mx-auto p-4 space-y-4">
+        {!unlocked && (
+          <div className="rounded-xl border border-amber-400/40 bg-amber-400/10 text-amber-200 text-sm p-3">
+            🔒 {!profile.configured ? "Step 1: set your school profile." : "Step 2: choose Exam Type, Subject and Total Items, then encode and SAVE the Answer Key."} The other tabs unlock after that.
+          </div>
+        )}
+
+        {rosterView && <RosterPage key={rosterView} label={rosterView} initial={rosters[rosterView]} flash={flash} onBack={() => setRosterView(null)} onSave={rs => saveRoster(rosterView, rs)} onDownload={(rs, kind) => downloadSheets(rosterView, rs, kind)} onCodeList={rs => downloadCodeList(rosterView, rs)} />}
+        {!rosterView && <>
+        {/* TABS */}
+        <nav className="flex flex-wrap gap-1 glass rounded-2xl p-1">
+          {TABS.map(([k, l]) => {
+            const locked = k !== "setup" && !unlocked;
+            return <button key={k} onClick={() => goTab(k)} className={`px-3 py-2 text-sm rounded-xl transition ${tab === k ? "bg-cyan-500 text-slate-950 font-bold" : "hover:bg-white/10 text-slate-300"} ${locked ? "opacity-50" : ""} ${shake === k ? "shake" : ""}`}>{locked ? "🔒 " : ""}{l}</button>;
+          })}
+        </nav>
+
+        {/* STAT STRIP */}
+        {unlocked && tab !== "setup" && tab !== "history" && (
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
+            {[["Learners", data.total], ["Mean", fmt(data.mean)], ["MPS", fmt(data.mps) + "%"], ["Std. Dev.", fmt(data.sd)], ["Passed / Failed", `${data.passed} / ${data.total - data.passed}`], ["High / Low", `${data.high} / ${data.low}`]].map(([l, v]) =>
+              <Card key={l} className="!p-3"><p className="text-[11px] text-slate-400">{l}</p><p className="text-lg font-black text-white">{v}</p></Card>)}
+            <Card className="!p-3"><p className="text-[11px] text-slate-400 mb-1">Proficiency</p><Badge pct={data.mps} /></Card>
+          </div>
+        )}
+
+        {/* ===== SETUP ===== */}
+        {tab === "setup" && <>
+          <Card>
+            <h2 className="font-black text-white text-lg mb-3">🎯 Exam Configuration</h2>
+            <div className="grid md:grid-cols-4 gap-3">
+              <label><Label>Term</Label>
+                <Select value={term} onChange={e => updateConfig({ term: e.target.value })}>
+                  {["Term 1", "Term 2", "Term 3"].map(t => <option key={t}>{t}</option>)}</Select></label>
+              <label><Label>Exam</Label>
+                <Select value={slot} onChange={e => updateConfig({ slot: e.target.value })}>
+                  <option value="ST1">Summative Test 1 (ST1)</option><option value="ST2">Summative Test 2 (ST2)</option><option value="TE">Term Exam (TE)</option></Select></label>
+              <label><Label>Subject</Label>
+                <Select value={config.subject} onChange={e => updateConfig({ subject: e.target.value })}>
+                  {SUBJECTS.filter(s => config.examType === "term" || !s.termOnly).map(s => <option key={s.code} value={s.code}>{s.label}</option>)}</Select></label>
+              <label><Label>Total Items</Label>
+                <Input type="number" min="1" max="100" defaultValue={config.itemCount} key={config.itemCount}
+                  onBlur={e => { const v = Math.max(1, Math.min(100, +e.target.value || 1)); if (v !== config.itemCount) updateConfig({ itemCount: v }, true); }}
+                  onKeyDown={e => e.key === "Enter" && e.target.blur()} /></label>
+            </div>
+            {itemWarn && <p className="mt-3 text-xs rounded-lg border border-amber-400/40 bg-amber-400/10 text-amber-200 p-2">⚠ {itemWarn} You can still continue. (Grade is taken from Class Setup: {grade}.)</p>}
+            <div className="grid md:grid-cols-2 gap-3 mt-3">
+              <label><Label>Passing Mark (% correct)</Label>
+                <Input type="number" min="1" max="100" value={passMark} onChange={e => { const v = Math.max(1, Math.min(100, +e.target.value || 1)); setPassMark(v); store.set("passMarkV2", v); }} />
+                <span className="text-[11px] text-slate-500">DO 15, s. 2026 (SY 2026–2027 adjusted table): 70 = passing 75. From SY 2027–2028, 75 = 75.</span></label>
+            </div>
+          </Card>
+
+          <Card>
+            <div ref={keyRef} className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <h2 className="font-black text-white text-lg">🔑 Answer Key ({n})</h2>
+              <div className="flex items-center gap-2">
+                {keySaved ? <span className="text-xs text-emerald-300">✔ Saved</span> : <span className="text-xs text-amber-300">Not saved yet</span>}
+                <button onClick={saveKey} className="px-4 py-2 text-sm rounded-lg bg-emerald-500 text-slate-950 font-bold">Save Answer Key</button>
+              </div>
+            </div>
+            {tags && (
+              <div className="mb-3 bg-slate-900/50 rounded-xl p-3">
+                <p className="text-xs text-slate-300 mb-2"><b>Component of each item.</b> Tap the colored tag under an item to change it, or type item numbers below (e.g. <span className="font-mono">1, 3, 6-7, 10-12</span>) and press Set.</p>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {subj.comps.map((c, ci) => {
+                    const cnt = tags.filter(t => t === ci).length;
+                    return (
+                      <div key={c} className="flex items-center gap-2">
+                        <span className={`${COMP_STYLE[ci]} text-white text-[11px] font-bold rounded px-2 py-1 w-24 text-center`}>{c} · {cnt}</span>
+                        <Input value={quick[ci] || ""} placeholder={listItems(tags.map((t, i) => t === ci ? i + 1 : 0).filter(Boolean)) || "item numbers"} onChange={e => setQuick({ ...quick, [ci]: e.target.value })} onKeyDown={e => e.key === "Enter" && applyQuick(ci)} className="!py-1 text-xs font-mono" />
+                        <button onClick={() => applyQuick(ci)} className="px-2 py-1 text-xs rounded bg-white/10">Set</button>
+                      </div>);
+                  })}
+                </div>
+                <button onClick={() => { setTags(defaultTags(n, subj.comps)); setQuick({}); }} className="mt-2 text-[11px] text-slate-400 underline">Reset to blocks</button>
+              </div>
+            )}
+            <div className="grid grid-cols-5 sm:grid-cols-10 gap-2 max-h-80 overflow-y-auto">
+              {key.map((k, i) => (
+                <div key={i} className="text-center bg-slate-900/50 rounded-lg p-1">
+                  <span className="block text-[10px] text-slate-400">{i + 1}</span>
+                  <div className="flex justify-center gap-0.5">
+                    {LETTERS.map(l => <button key={l} onClick={() => setKey(a => a.map((v, j) => j === i ? l : v))}
+                      className={`w-5 h-5 rounded-full text-[9px] font-bold border ${k === l ? "bg-cyan-400 text-slate-950 border-cyan-300" : "border-white/20 text-slate-400"}`}>{l}</button>)}
+                  </div>
+                  {tags && <button onClick={() => cycleTag(i)} title="Tap to change component" className={`mt-1 w-full rounded text-[9px] font-bold text-white ${COMP_STYLE[tags[i]]}`}>{subj.comps[tags[i]]}</button>}
+                </div>))}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-2">Tip: you can also shade a sheet as KEY and scan it. The key fills in by itself.</p>
+          </Card>
+
+          <Card>
+            <h2 className="font-black text-white text-lg mb-3">🏷️ Class Setup</h2>
+            <div className="grid md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+              <label><Label>Grade</Label><Select value={grade} onChange={e => setGrade(e.target.value)}>{GRADES.map(g => <option key={g}>{g}</option>)}</Select></label>
+              <label><Label>Section</Label><Input value={section} placeholder="e.g. WALING-WALING" onChange={e => setSection(up(e.target.value))} /></label>
+              <button onClick={addClass} className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-sm">+ Save class</button>
+            </div>
+            {classes.length > 0 && <div className="flex flex-wrap gap-2 mt-3">
+              {classes.map(c => <span key={c} className={`flex items-center gap-1 text-xs rounded-full pl-3 pr-1 py-1 border ${c === `${grade} – ${section}` ? "bg-cyan-500/20 border-cyan-400 text-cyan-100" : "border-white/15 text-slate-300"}`}>
+                <button onClick={() => pickClass(c)}>{c}</button>
+                <button onClick={() => removeClass(c)} className="w-5 h-5 rounded-full hover:bg-white/10 text-slate-400">×</button></span>)}
+            </div>}
+            {classes.length > 0 && <div className="flex flex-wrap gap-2 mt-2">
+              {classes.map(c => <button key={c} onClick={() => setRosterView(c)} className="text-[11px] px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/25">
+                👥 Add Students from {sectionOf(c)}{rosterCount(c) ? ` (${rosterCount(c)})` : ""}</button>)}
+            </div>}
+            <p className="text-xs text-slate-400 mt-3">Checking now: <b className="text-white">{gradeSection}</b> · {examLabel} · {subj.label} · {n} items · {students.length} learner(s) loaded{roster ? ` · ${roster.boys.filter(Boolean).length + roster.girls.filter(Boolean).length} enrolled in the student list` : " · no student list yet"}</p>
+            <details className="mt-3">
+              <summary className="text-xs text-cyan-300 cursor-pointer">Paste learner answers as JSON (optional, instead of scanning)</summary>
+              <textarea value={rawText} onChange={e => setRawText(e.target.value)} spellCheck="false" placeholder='{"students":[{"student_id":"B-1","student_name":"Dela Cruz, Juan","responses":{"1":"A","2":"B"}}]}'
+                className="mt-2 w-full min-h-[8rem] font-mono text-xs bg-slate-950/70 border border-white/10 rounded-lg p-2 text-slate-200" />
+              {rawErr && <p className="text-xs text-red-400">JSON error: {rawErr}</p>}
+              <button onClick={loadJson} className="mt-1 px-3 py-1.5 text-xs rounded-lg bg-cyan-500 text-slate-950 font-bold">Load JSON</button>
+            </details>
+          </Card>
+        </>}
+
+        {tab === "scan" && unlocked && <>
+          <ScanPanel onStudent={addScanned} onKey={onScannedKey} n={n} hasKey={keySaved} />
+          <Card><p className="text-sm text-slate-300">{students.length} learner(s) in <b>{gradeSection}</b>. {students.length > 0 && <button onClick={() => setTab("grades")} className="text-cyan-300 underline">See Gradesheet →</button>}</p></Card>
+        </>}
+
+        {tab === "grades" && unlocked && <div>
+          <GradeTable title="BOYS" rows={data.boys} stats={data.bStats} tone="bg-blue-700/80" />
+          <GradeTable title="GIRLS" rows={data.girls} stats={data.gStats} tone="bg-pink-600/80" />
+          {data.missing.length > 0 && <p className="text-sm text-sky-200 bg-sky-500/10 p-3 rounded-lg mb-2">📝 Enrolled but no sheet yet ({data.missing.length}): {data.missing.map(id => `${id} ${toInitials(rosterName(id))}`).join(", ")}</p>}
+          {data.notEnrolled.length > 0 && <p className="text-sm text-amber-200 bg-amber-500/10 p-3 rounded-lg mb-2">⚠ Scanned IDs not in this section's student list: {data.notEnrolled.join(", ")}. Check the shaded Learner ID or update the list.</p>}
+          {data.other.length > 0 && <p className="text-sm text-amber-200 bg-amber-500/10 p-3 rounded-lg">{data.other.length} learner(s) have IDs that don't start with B- or G- ({data.other.map(s => s.id).join(", ")}). Fix their IDs to sort them.</p>}
+        </div>}
+
+        {tab === "chart" && unlocked && <Card>
+          <h3 className="font-black text-white mb-1">Frequency of Errors per Item</h3>
+          <p className="text-xs text-slate-400 mb-2">Red = Critical Competency for Review (over 50% wrong) · Amber = least mastered (below 75% correct) · Green = mastered. Dashed line = 50%.</p>
+          {data.critical.length > 0 && <div className="mb-3 bg-red-500/10 border border-red-400/40 text-red-200 text-sm rounded-lg p-3"><b>Critical Competency for Review:</b> {data.critical.map(i => `Q${i.no} (${fmt(i.foePct)}% wrong)`).join(", ")}</div>}
+          <div className="relative flex items-end gap-1 h-64 border-b border-l border-white/20 px-1 overflow-x-auto">
+            <div className="absolute left-0 right-0 border-t-2 border-dashed border-red-400/70 pointer-events-none" style={{ bottom: "42.5%" }}><span className="absolute right-1 -top-4 text-[10px] text-red-300">50% error</span></div>
+            {data.items.map(i => (
+              <div key={i.no} className="flex flex-col items-center justify-end h-full flex-1 min-w-[16px]" title={`Q${i.no}: ${i.wrong} wrong of ${data.total} (${fmt(i.foePct)}%) · key ${i.key}`}>
+                <span className="text-[10px] text-slate-400 mb-0.5">{i.wrong}</span>
+                <div className={`w-full rounded-t ${i.foePct > 50 ? "bg-red-500" : i.pctCorrect < 75 ? "bg-amber-400" : "bg-emerald-500"}`} style={{ height: `${data.total ? i.wrong / data.total * 85 : 0}%`, minHeight: i.wrong ? 3 : 0 }} />
+              </div>))}
+          </div>
+          <div className="flex gap-1 px-1 overflow-x-auto">{data.items.map(i => <div key={i.no} className="flex-1 min-w-[16px] text-center text-[10px] text-slate-500">{i.no}</div>)}</div>
+          <div className="overflow-x-auto mt-4"><table className="w-full text-sm">
+            <thead className="bg-white/5 text-slate-300"><tr><th className="p-2">Item</th>{tags && <th className="p-2">Component</th>}<th className="p-2">Key</th><th className="p-2">Correct</th><th className="p-2">FOE</th><th className="p-2">FOE %</th><th className="p-2">% Correct</th><th className="p-2 text-left">Remark</th></tr></thead>
+            <tbody>{data.items.map(i => <tr key={i.no} className="border-t border-white/5 text-center">
+              <td className="p-2 font-bold">{i.no}</td>{tags && <td className="p-2"><span className={`text-[10px] font-bold text-white px-1.5 py-0.5 rounded ${COMP_STYLE[tags[i.no - 1]]}`}>{compOf(i.no - 1)}</span></td>}<td className="p-2 font-mono">{i.key}</td><td className="p-2">{i.correct}</td><td className="p-2 font-bold">{i.wrong}</td><td className="p-2">{fmt(i.foePct)}</td><td className="p-2">{fmt(i.pctCorrect)}</td>
+              <td className="p-2 text-left">{i.foePct > 50 ? <span className="bg-red-600 text-white text-xs px-2 py-0.5 rounded font-bold">Critical Competency for Review</span> : i.pctCorrect >= 75 ? <span className="text-emerald-300">Mastered</span> : <span className="text-amber-300">Least Mastered</span>}</td></tr>)}</tbody>
+          </table></div>
+        </Card>}
+
+        {tab === "summary" && unlocked && <Card>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h3 className="font-black text-white">🧾 DepEd Form Summary (SMEA)</h3>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => copyText(summaryText, "Summary copied.")} className="px-3 py-1.5 text-sm rounded-lg bg-white/10">Copy Summary</button>
+              <button onClick={() => copyText(buildCSV(), "CSV copied.")} className="px-3 py-1.5 text-sm rounded-lg bg-white/10">Copy CSV</button>
+              <button onClick={() => saveFile("﻿" + buildCSV(), csvName, "text/csv;charset=utf-8;")} className="px-3 py-1.5 text-sm rounded-lg bg-emerald-500 text-slate-950 font-bold">⬇ Download CSV</button>
+              <button disabled={!data.total} onClick={() => setModal("finalize")} className="px-3 py-1.5 text-sm rounded-lg bg-cyan-500 text-slate-950 font-bold disabled:opacity-30">✅ Finalize Session</button>
+            </div>
+          </div>
+          <pre className="whitespace-pre-wrap font-mono text-sm bg-slate-950/70 border border-white/10 rounded-lg p-4 select-all text-slate-200">{summaryText}</pre>
+          <div className="overflow-x-auto"><table className="w-full text-sm mt-4">
+            <thead className="bg-white/5 text-slate-300"><tr><th className="p-2 text-left">Group</th><th className="p-2">Learners</th><th className="p-2">Mean</th><th className="p-2">MPS</th><th className="p-2">SD</th><th className="p-2 text-left">Proficiency</th></tr></thead>
+            <tbody>{[["Boys", data.bStats], ["Girls", data.gStats], ["Total", { count: data.total, mean: data.mean, mps: data.mps, sd: data.sd }]].map(([g, s]) =>
+              <tr key={g} className={`border-t border-white/5 text-center ${g === "Total" ? "font-bold bg-white/5" : ""}`}><td className="p-2 text-left">{g}</td><td className="p-2">{s.count}</td><td className="p-2">{fmt(s.mean)}</td><td className="p-2">{fmt(s.mps)}%</td><td className="p-2">{fmt(s.sd)}</td><td className="p-2 text-left"><Badge pct={s.mps} /></td></tr>)}</tbody>
+          </table></div>
+          {data.comps.length > 0 && <div className="overflow-x-auto"><table className="w-full text-sm mt-4">
+            <thead className="bg-white/5 text-slate-300"><tr><th className="p-2 text-left">Component</th><th className="p-2">Items</th><th className="p-2">Mean</th><th className="p-2">MPS</th><th className="p-2 text-left">Proficiency</th></tr></thead>
+            <tbody>{data.comps.map(c => <tr key={c.label} className="border-t border-white/5 text-center"><td className="p-2 text-left font-bold">{c.label}</td><td className="p-2 text-xs font-mono">{c.count}: {c.items}</td><td className="p-2">{fmt(c.mean)} / {c.count}</td><td className="p-2">{fmt(c.mps)}%</td><td className="p-2 text-left"><Badge pct={c.mps} /></td></tr>)}</tbody>
+          </table></div>}
+          <p className="text-[11px] text-slate-500 mt-3">Levels: 96–100 Mastered · 86–95 Closely Approximating · 66–85 Moving Towards · 35–65 Average · 15–34 Low · 5–14 Very Low · 0–4 Absolutely No Mastery.</p>
+          <div className="mt-4 text-right"><button onClick={() => setModal("reset")} className="text-xs text-red-300 underline">Clear answers &amp; key for a new exam</button></div>
+        </Card>}
+
+        {tab === "history" && unlocked && <Card>
+          {exData && <div className="mb-6 rounded-2xl border border-cyan-400/30 bg-cyan-500/5 p-3">
+            <h3 className="font-black text-white mb-1">📘 Exams Component (ST1 + ST2 + TE)</h3>
+            <p className="text-xs text-slate-400 mb-2">Uses the latest finalized ST1, ST2 and TE of the same class, subject and term. <b>A</b> = add the raw points (for example 25 + 25 + 50 = 100). <b>B</b> = DO 15, s. 2026 weights: ST1 30% + ST2 30% + TE 40% of each test's percentage. Pick the one your school requires for the class record.</p>
+            <div className="grid sm:grid-cols-3 gap-2 mb-3">
+              <Select value={exData.cls} onChange={e => setExSel({ cls: e.target.value, subject: "", term: exSel.term })}>{exOptions.cls.map(c => <option key={c}>{c}</option>)}</Select>
+              <Select value={exData.sub} onChange={e => setExSel({ ...exSel, cls: exData.cls, subject: e.target.value })}>{exOptions.subs.map(c => <option key={c}>{c}</option>)}</Select>
+              <Select value={exData.tm} onChange={e => setExSel({ ...exSel, cls: exData.cls, term: e.target.value })}>{exOptions.terms.map(c => <option key={c}>{c}</option>)}</Select>
+            </div>
+            <p className="text-xs text-slate-300 mb-2">{[["ST1", exData.st1], ["ST2", exData.st2], ["TE", exData.te]].map(([k, x]) => `${k}: ${x ? `${x.itemCount} items ✔` : "not finalized yet"}`).join(" · ")}</p>
+            <div className="overflow-x-auto max-h-96"><table className="w-full text-sm">
+              <thead className="bg-white/5 text-slate-300 sticky top-0"><tr><th className="p-2 text-left">Code</th><th className="p-2 text-left">Initials</th><th className="p-2">ST1</th><th className="p-2">ST2</th><th className="p-2">TE</th><th className="p-2">A: Points %</th><th className="p-2">B: 30/30/40 %</th></tr></thead>
+              <tbody>{exData.rows.map(r => <tr key={r.id} className="border-t border-white/5 text-center">
+                <td className="p-2 text-left font-mono font-bold text-cyan-200">{r.id}</td><td className="p-2 text-left">{r.initials}</td>
+                <td className="p-2">{r.a ?? "—"}</td><td className="p-2">{r.b ?? "—"}</td><td className="p-2">{r.c ?? "—"}</td>
+                <td className="p-2 font-bold">{r.points != null ? fmt(r.points) : <span className="text-slate-500 text-xs">incomplete</span>}</td>
+                <td className="p-2 font-bold">{r.weighted != null ? fmt(r.weighted) : <span className="text-slate-500 text-xs">incomplete</span>}</td></tr>)}</tbody>
+            </table></div>
+            <div className="flex gap-2 mt-2"><button onClick={() => saveFile(exCSV(), `Exams_Component_${exData.cls.replace(/[^\w]+/g, "_")}_${exData.sub.replace(/[^\w]+/g, "_")}_${exData.tm.replace(" ", "")}.csv`, "text/csv;charset=utf-8;")} className="px-3 py-1.5 text-xs rounded-lg bg-emerald-500 text-slate-950 font-bold">⬇ Download Exams Component CSV</button>
+              <button onClick={() => copyText(exCSV(), "Exams Component copied.")} className="px-3 py-1.5 text-xs rounded-lg bg-white/10">Copy</button></div>
+            <p className="text-[11px] text-slate-500 mt-1">"incomplete" = the learner is missing one of the three tests. Initials come from the learner list on this device.</p>
+          </div>}
+          <h3 className="font-black text-white mb-1">🗂️ Finalized Sessions</h3>
+          <p className="text-xs text-slate-400 mb-3">{saveMode}.</p>
+          {history.length === 0 ? <p className="text-sm text-slate-500">No finalized sessions yet. Finalize one from the Summary tab.</p> :
+            <div className="space-y-2">{history.map(h => (
+              <div key={h.id} className="bg-slate-900/60 border border-white/10 rounded-xl p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="font-bold text-white">{h.gradeSection} · {h.subject} · {h.slot ? `${h.slot} · ${h.term}` : (h.examType === "summative" ? "Summative" : "Term")} ({h.itemCount} items)</p>
+                    <p className="text-xs text-slate-400">{new Date(h.at).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })} · {h.learners} learners · MPS {fmt(h.mps)}% · Passing rate {fmt(h.passingRate)}%</p>
+                  </div>
+                  <div className="flex items-center gap-2"><Badge pct={h.mps} />
+                    <button onClick={() => setOpenHist(openHist === h.id ? null : h.id)} className="text-xs px-2 py-1 rounded bg-white/10">{openHist === h.id ? "Hide" : "View"}</button>
+                    <button onClick={() => saveFile("﻿" + h.csv, h.csvName, "text/csv;charset=utf-8;")} className="text-xs px-2 py-1 rounded bg-emerald-500/20 text-emerald-200">CSV</button>
+                    <button onClick={() => { if (openHist === "del" + h.id) deleteHist(h.id); else setOpenHist("del" + h.id); }} className="text-xs px-2 py-1 rounded bg-red-500/20 text-red-200">{openHist === "del" + h.id ? "Tap again to delete" : "Delete"}</button>
+                  </div>
+                </div>
+                {openHist === h.id && <div className="mt-2">
+                  <pre className="whitespace-pre-wrap font-mono text-xs bg-slate-950/70 rounded-lg p-3 text-slate-300">{h.summary}</pre>
+                  <button onClick={() => copyText(h.summary, "Summary copied.")} className="mt-1 text-xs px-2 py-1 rounded bg-white/10">Copy Summary</button>
+                </div>}
+              </div>))}</div>}
+          <div className="mt-8 pt-5 border-t border-red-500/30 text-center">
+            <p className="text-xs text-red-300/80 mb-2">Danger zone: this erases your profile, classes, learner lists, answer key and History.</p>
+            <button onClick={() => setModal("resetAll")} className="px-6 py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black tracking-wide shadow-[0_4px_0_#7f1d1d]">⚠️ RESET ALL DATA</button>
+          </div>
+        </Card>}
+        </>}
+      </div>
+
+      {/* ===== MODALS ===== */}
+      {modal === "profile" && <ProfileModal initial={profile} onSave={saveProfile} onClose={() => setModal(null)} />}
+      {modal === "keyPrompt" && <Modal onClose={() => setModal(null)}>
+        <div className="text-center"><div className="text-4xl mb-2">🔑</div>
+          <h3 className="text-lg font-black text-white mb-2">Encode your answer keys in the Answer Key ({n}) tab</h3>
+          <p className="text-sm text-slate-400 mb-4">Tap A, B, C or D for each item, then press <b>Save Answer Key</b>.</p>
+          <button onClick={() => { setModal(null); setTab("setup"); setTimeout(() => keyRef.current && keyRef.current.scrollIntoView({ behavior: "smooth" }), 50); }} className="w-full py-2.5 rounded-xl bg-cyan-500 text-slate-950 font-bold">Encode Answer Keys</button></div>
+      </Modal>}
+      {modal === "copyPrompt" && <Modal onClose={() => setModal(null)}>
+        <div className="text-center"><div className="text-4xl mb-2">📄</div>
+          <h3 className="text-lg font-black text-white mb-2">Answer key saved! All tabs are unlocked.</h3>
+          <p className="text-sm text-slate-400 mb-4">Press <b>Copy A/S</b> for your personalized DepEd answer sheets (4 per A4).</p>
+          <div className="flex gap-2"><button onClick={() => setModal(null)} className="flex-1 py-2.5 rounded-xl bg-white/10">Later</button>
+            <button onClick={() => setModal("copyAS")} className="flex-1 py-2.5 rounded-xl bg-amber-400 text-slate-950 font-bold">Copy A/S</button></div></div>
+      </Modal>}
+      {modal === "copyAS" && (() => {
+        const o = { profile, n, subject: subj.label, exam: `${examLabel} · ${term}` };
+        const dl = async kind => {
+          try {
+            setBlankBusy(kind);
+            const pages = Math.max(1, Math.min(25, +blankPages || 1)); setBlankPages(pages);
+            const name = `DepEd_Extra_Answer_Sheets_${n}items_${pages * 4}sheets`;
+            if (kind === "pdf") { if (!window.jspdf) throw new Error("PDF tool not loaded"); await saveFile(sheetsPdf(o, blankList(pages)), name + ".pdf", "application/pdf"); }
+            else { if (!window.docx) throw new Error("Word tool not loaded"); await saveFile(await sheetsDocx(o, blankList(pages)), name + ".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"); }
+          } catch (e) { flash("Couldn't make the file: " + (e.message || "try again")); }
+          setBlankBusy("");
+        };
+        return (
+          <Modal wide onClose={() => setModal(null)}>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+              <h3 className="text-lg font-black text-white">📄 Extra Answer Sheets (blank) · {n} items</h3>
+              <button onClick={() => setModal(null)} className="text-slate-400 text-xl">✕</button>
+            </div>
+            <p className="text-xs text-slate-400 mb-3">For <b>late enrollees</b> and <b>replacement sheets</b> when a learner spoils their own. Your region, division and school are printed; <b>Name, Grade &amp; Section, Date and CODE are left blank</b> to write by hand. Subject and exam come from the current settings ({subj.label} · {examLabel} · {term}).</p>
+            <div className="grid md:grid-cols-[auto_1fr] gap-4 items-start">
+              <div className="bg-slate-200 rounded-xl p-3 flex justify-center"><BlankPreview o={o} /></div>
+              <div className="space-y-3">
+                <label className="block"><Label>How many A4 pages? (4 sheets each)</Label>
+                  <Input type="number" min="1" max="25" value={blankPages} onChange={e => setBlankPages(e.target.value)} onBlur={() => setBlankPages(Math.max(1, Math.min(25, +blankPages || 1)))} className="!w-28" />
+                  <span className="text-xs text-slate-400"> = {Math.max(1, Math.min(25, +blankPages || 1)) * 4} sheets (max 25 pages)</span></label>
+                <button disabled={!!blankBusy} onClick={() => dl("pdf")} className="w-full py-3 rounded-xl bg-red-500 hover:bg-red-400 text-white font-black disabled:opacity-40">{blankBusy === "pdf" ? "Making PDF…" : "⬇ Download PDF"}</button>
+                <button disabled={!!blankBusy} onClick={() => dl("docx")} className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black disabled:opacity-40">{blankBusy === "docx" ? "Making Word file…" : "⬇ Download Microsoft Word (.docx)"}</button>
+                <p className="text-[11px] text-slate-400">Print: A4 · Portrait · Scale 100% (Actual size) · no "fit to page". Cut on the dashed lines. Learners write their CODE (from your Code List) in the box so the scanner can match them.</p>
+                <p className="text-[11px] text-slate-500">For the named sheets of a whole class, use "Add Students" → Download Answer Sheets in Class Setup.</p>
+              </div>
+            </div>
+          </Modal>);
+      })()}
+      {modal === "finalize" && <Modal onClose={() => setModal(null)}>
+        <h3 className="text-lg font-black text-white mb-2">Finalize this session?</h3>
+        <p className="text-sm text-slate-300 mb-4">{gradeSection} · {subj.label} · {examLabel} · {data.total} learners · MPS {fmt(data.mps)}%. It will be saved to History with its summary and CSV.</p>
+        <div className="flex gap-2"><button onClick={finalize} className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white font-bold">✔ Finalize</button>
+          <button onClick={() => setModal(null)} className="flex-1 py-2.5 rounded-xl bg-white/10">Cancel</button></div>
+      </Modal>}
+      {modal === "resetAll" && <Modal>
+        <div className="text-center">
+          <div className="text-5xl mb-2">⚠️</div>
+          <h3 className="text-xl font-black text-red-300 mb-2">Reset ALL data?</h3>
+          <p className="text-sm text-slate-300 mb-1">This will <b>completely erase</b> everything you encoded and saved:</p>
+          <p className="text-xs text-slate-400 mb-4">school profile · {classes.length} saved class(es) and their learner lists · answer key and exam settings · {history.length} finalized session(s) in History</p>
+          <p className="text-xs text-amber-200 mb-4">This cannot be undone. Download the CSVs you need from History first.</p>
+          <div className="flex gap-3">
+            <button disabled={resetBusy} onClick={resetAll} className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold disabled:opacity-50">{resetBusy ? "Erasing…" : "Yes, erase everything"}</button>
+            <button disabled={resetBusy} onClick={() => { setModal(null); setTab("setup"); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="flex-1 py-2.5 rounded-xl bg-white/10 font-bold">Cancel</button>
+          </div>
+        </div>
+      </Modal>}
+      {modal === "reset" && <Modal onClose={() => setModal(null)}>
+        <h3 className="text-lg font-black text-white mb-2">Clear answers and key?</h3>
+        <p className="text-sm text-slate-300 mb-4">This removes the loaded learner answers and resets the answer key so you can check another exam. Your profile, saved classes and History stay. Finalize first if you want to keep this result.</p>
+        <div className="flex gap-2"><button onClick={resetExam} className="flex-1 py-2.5 rounded-xl bg-red-600 text-white font-bold">Clear</button>
+          <button onClick={() => setModal(null)} className="flex-1 py-2.5 rounded-xl bg-white/10">Cancel</button></div>
+      </Modal>}
+
+      {toast && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] bg-slate-800 border border-white/10 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{toast}</div>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+
+</script>
+</body>
+</html>

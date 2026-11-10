@@ -1,0 +1,80 @@
+<!DOCTYPE html><html><body><canvas id="c"></canvas><script>
+const up = v => String(v || "").toUpperCase();
+const esc = s => String(s);
+</script>
+<script src="sheetgen.js"></script><script src="sheetdraw.js"></script><script src="omr.js"></script>
+<script>
+function rng(seed) { let s = seed; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
+/* render one sheet (sheet-local) at k px/mm with shading */
+function makeSheet(n, code, answers, opts, R) {
+  const k = opts.ppm, c = document.createElement("canvas"); c.width = Math.round(105 * k); c.height = Math.round(148.5 * k);
+  const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+  const o = { profile: { region: "REGION XI", division: "SCHOOLS DIVISION OF DAVAO CITY", school: "LEON GARCIA SR. NATIONAL HIGH SCHOOL" }, n, gradeSection: "Grade 7 – LILY", subject: "Music and Arts", exam: "ST1 · Term 2" };
+  drawSheetCell(canvasPen(ctx, k), o, { code }, 0, 0);
+  const { L, centers } = bubbleCenters(n);
+  answers.forEach((a, qi) => {
+    const marks = a === "DOUBLE" ? [0, 2] : a === "ERASED" ? [] : a ? ["ABCD".indexOf(a)] : [];
+    if (a === "ERASED") marks.push(-1);
+    marks.forEach(mi => {
+      const k2 = mi < 0 ? 1 : mi; const [cx, cy] = centers[qi][k2];
+      const g = mi < 0 ? 175 : (opts.pencil ? 70 + R() * 40 : 20);
+      const cover = mi < 0 ? 0.8 : opts.coverMin + R() * (1 - opts.coverMin);
+      for (let t = 0; t < 900; t++) {                       // scribble dots inside circle
+        const ang = R() * Math.PI * 2, rr = Math.sqrt(R()) * L.b / 2 * 1.05;
+        if (R() > cover) continue;
+        ctx.fillStyle = `rgb(${g},${g},${g})`; ctx.beginPath(); ctx.arc((cx + Math.cos(ang) * rr) * k, (cy + Math.sin(ang) * rr) * k, 0.35 * k, 0, 7); ctx.fill();
+      }
+    });
+  });
+  return c;
+}
+/* place the sheet into a "photo" with perspective, rotation, lighting, blur, noise */
+function photograph(sheet, opts, R) {
+  const W = opts.photoW, H = opts.photoH, out = document.createElement("canvas"); out.width = W; out.height = H;
+  const ctx = out.getContext("2d"); ctx.fillStyle = opts.bg; ctx.fillRect(0, 0, W, H);
+  // destination quad for the sheet corners (perspective)
+  const sw = W * opts.scale, sh = sw * 1.414, cx = W / 2 + opts.dx * W, cy = H / 2 + opts.dy * H, rot = opts.rot * Math.PI / 180;
+  const quad = [[-sw / 2, -sh / 2], [sw / 2, -sh / 2], [-sw / 2, sh / 2], [sw / 2, sh / 2]].map(([x, y], i) => {
+    const p = opts.persp; const sx = (i < 2 ? 1 - p : 1 + p);           // top narrower than bottom
+    const xx = x * sx, xr = xx * Math.cos(rot) - y * Math.sin(rot), yr = xx * Math.sin(rot) + y * Math.cos(rot);
+    return [cx + xr, cy + yr];
+  });
+  const sp = [[0, 0], [sheet.width, 0], [0, sheet.height], [sheet.width, sheet.height]];
+  const inv = homography(quad, sp);
+  const sctx = sheet.getContext("2d"), sd = sctx.getImageData(0, 0, sheet.width, sheet.height).data;
+  const od = ctx.getImageData(0, 0, W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const [u, v] = inv(x, y); if (u < 0 || v < 0 || u >= sheet.width - 1 || v >= sheet.height - 1) continue;
+    const i = (Math.floor(v) * sheet.width + Math.floor(u)) * 4, o = (y * W + x) * 4;
+    od.data[o] = sd[i]; od.data[o + 1] = sd[i + 1]; od.data[o + 2] = sd[i + 2];
+  }
+  // lighting gradient + noise
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const o = (y * W + x) * 4, light = 1 - opts.shadow * (x / W) * (y / H), noise = (R() - 0.5) * opts.noise;
+    for (let c = 0; c < 3; c++) od.data[o + c] = Math.max(0, Math.min(255, od.data[o + c] * light * opts.bright + noise));
+  }
+  ctx.putImageData(od, 0, 0);
+  if (opts.blur) { const b = document.createElement("canvas"); b.width = W; b.height = H; const bc = b.getContext("2d"); bc.filter = `blur(${opts.blur}px)`; bc.drawImage(out, 0, 0); return b; }
+  return out;
+}
+window.runTests = (cases) => {
+  const results = [];
+  for (const tc of cases) {
+    const R = rng(tc.seed);
+    const answers = Array.from({ length: tc.n }, () => { const r = R(); return r < tc.pBlank ? null : r < tc.pBlank + tc.pDouble ? "DOUBLE" : r < tc.pBlank + tc.pDouble + tc.pErase ? "ERASED" : "ABCD"[Math.floor(R() * 4)]; });
+    const sheet = makeSheet(tc.n, tc.code, answers, tc, R);
+    const photo = photograph(sheet, tc, R);
+    const t0 = performance.now(); const res = readSheet(photo, tc.n); const ms = performance.now() - t0;
+    if (!res.ok) { results.push({ name: tc.name, ok: false, reason: res.reason, ms }); continue; }
+    let right = 0, wrong = 0, flaggedOk = 0, missedFlag = 0, wrongDetail = [];
+    answers.forEach((a, i) => {
+      const got = res.answers[i], fl = res.flagged.includes(i + 1);
+      if (a === "DOUBLE") { if (fl) flaggedOk++; else if (got) { wrong++; wrongDetail.push(`${i+1}:double->${got}`); } else missedFlag++; }
+      else if (a === "ERASED" || a === null) { if (got) { wrong++; wrongDetail.push(`${i+1}:${a}->${got}`); } else right++; }
+      else if (got === a) right++; else if (fl) flaggedOk++; else { wrong++; wrongDetail.push(`${i+1}:${a}->${got} f=${res.fills[i].map(v=>v.toFixed(2))}`); }
+    });
+    results.push({ name: tc.name, ok: true, code: res.code, codeOk: res.code === tc.code, layout: res.ringScore.toFixed(2), right, wrong, flagged: res.flagged.length, flaggedOk, missedFlag, ms: Math.round(ms), wrongDetail: wrongDetail.slice(0, 4) });
+  }
+  return results;
+};
+</script></body></html>

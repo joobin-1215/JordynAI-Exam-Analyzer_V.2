@@ -1,0 +1,129 @@
+/* =====================================================================
+   DepEd OMR Answer Sheet: 4-UP PRINT CSS (A4 portrait, 210 x 297 mm)
+   4 equal quarter-sheets per page, each 105 x 148.5 mm (A6), 2 x 2 grid.
+   Print settings: Paper A4 · Portrait · Scale 100% ("Actual size",
+   NOT "Fit to page") · Margins: None · Background graphics: ON
+   ===================================================================== */
+
+/* ---------- 1. Page box ---------- */
+@page {
+  size: A4 portrait;          /* 210mm x 297mm */
+  margin: 0;                  /* the grid owns all spacing */
+}
+
+/* ---------- 2. Design tokens (all physical units) ---------- */
+:root {
+  --sheet-w: 105mm;           /* 210 / 2 */
+  --sheet-h: 148.5mm;         /* 297 / 2 */
+  --pad: 4mm;                 /* inner safe area (printers can't print the edge) */
+  --marker: 5mm;              /* black corner squares for photo alignment */
+  --bubble: 3.4mm;            /* answer circle diameter */
+  --bubble-gap: 0.8mm;        /* space between circles */
+  --row-h: 5.9mm;             /* item row height */
+  --ink: #000;
+  --muted: #555;
+  --stripe: #eef0f8;
+  --font: "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ---------- 3. Reset ---------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: #e5e7eb; font-family: var(--font); color: var(--ink); }
+
+/* ---------- 4. One A4 page = 2 x 2 grid ---------- */
+.page {
+  width: 210mm;
+  height: 297mm;
+  margin: 10mm auto;          /* screen preview only; removed in @media print */
+  background: #fff;
+  display: grid;
+  grid-template-columns: var(--sheet-w) var(--sheet-w);
+  grid-template-rows: var(--sheet-h) var(--sheet-h);
+  overflow: hidden;
+  position: relative;
+}
+
+/* Dashed cut lines through the middle */
+.page::before, .page::after {
+  content: ""; position: absolute; pointer-events: none;
+}
+.page::before { left: 50%; top: 0; bottom: 0; border-left: 0.3mm dashed #888; }
+.page::after  { top: 50%; left: 0; right: 0; border-top: 0.3mm dashed #888; }
+
+/* ---------- 5. One quarter-sheet ---------- */
+.sheet {
+  position: relative;
+  width: var(--sheet-w);
+  height: var(--sheet-h);
+  padding: var(--pad) 6mm;
+  overflow: hidden;           /* nothing may spill into the next sheet */
+  break-inside: avoid;
+}
+
+/* Corner alignment markers */
+.mk { position: absolute; width: var(--marker); height: var(--marker); background: var(--ink); }
+.mk.tl { top: 4mm; left: 4mm; }    .mk.tr { top: 4mm; right: 4mm; }
+.mk.bl { bottom: 4mm; left: 4mm; } .mk.br { bottom: 4mm; right: 4mm; }
+
+/* ---------- 6. Header ---------- */
+.hd { text-align: center; line-height: 1.25; margin-top: 1.5mm; }
+.hd .small  { font-size: 5.2pt; }
+.hd .school { font-size: 7.2pt; font-weight: 700; margin-top: 0.6mm; }
+.hd .title  { font-size: 8.5pt; font-weight: 700; letter-spacing: 0.3mm; }
+
+/* ---------- 7. Name / section lines ---------- */
+.lines { margin-top: 2.5mm; font-size: 6pt; }
+.lines .row { display: flex; gap: 2mm; margin-bottom: 2mm; }
+.field { display: flex; align-items: flex-end; white-space: nowrap; }
+.field i { flex: 1; border-bottom: 0.15mm solid var(--ink); margin-left: 1mm; height: 2.5mm; }
+.f-name { flex: 3.2; } .f-score { flex: 1; }
+.f-sec  { flex: 2; }   .f-subj  { flex: 1.5; } .f-date { flex: 1; }
+
+/* ---------- 8. Learner ID box ---------- */
+.idbox { border: 0.25mm solid var(--ink); border-radius: 1.5mm; padding: 1.2mm 2mm; }
+.idbox .cap { display: flex; justify-content: space-between; font-size: 6pt; font-weight: 700; }
+.idbox .cap span { font-weight: 400; font-size: 5pt; }
+.idrow { display: flex; align-items: center; height: 5mm; font-size: 5.5pt; }
+.idrow b { width: 12mm; }
+.idrow .opts { display: flex; gap: 4.2mm; }
+.idrow.type .opts { gap: 9mm; }
+.idrow.type label { display: flex; align-items: center; gap: 1mm; font-weight: 700; }
+.idrow em { margin-left: auto; font-size: 4.6pt; color: var(--muted); }
+
+/* ---------- 9. Bubbles ---------- */
+.b {
+  width: var(--bubble); height: var(--bubble);
+  border: 0.2mm solid var(--ink); border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 4.3pt; color: #666; background: #fff;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+
+/* ---------- 10. Directions ---------- */
+.dir { text-align: center; font-size: 5pt; margin: 1.6mm 0 1.2mm; }
+
+/* ---------- 11. Items 1-50: 4 columns (1-13, 14-26, 27-39, 40-50) ---------- */
+.items { display: grid; grid-template-columns: repeat(4, 1fr); column-gap: 1.5mm; }
+.col .abcd { display: flex; gap: var(--bubble-gap); padding-left: 5mm; font-size: 5pt; font-weight: 700; }
+.col .abcd span { width: var(--bubble); text-align: center; }
+.item { display: flex; align-items: center; height: var(--row-h); }
+.item:nth-child(even) { background: var(--stripe); }   /* child 1 is the A-B-C-D header */
+.item .no { width: 4.4mm; text-align: right; font-size: 5.8pt; font-weight: 700; padding-right: 0.6mm; }
+.item .bs { display: flex; gap: var(--bubble-gap); }
+
+.foot { position: absolute; bottom: 5mm; left: 0; right: 0; text-align: center; font-size: 4.3pt; color: #777; }
+
+/* ---------- 12. PRINT RULES ---------- */
+@media print {
+  html, body { background: #fff; width: 210mm; height: 297mm; }
+  .page { margin: 0; box-shadow: none; page-break-after: always; break-after: page; }
+  .page:last-child { page-break-after: auto; break-after: auto; }
+  .no-print { display: none !important; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }  /* keep markers + stripes */
+}
+
+/* Screen preview helpers */
+@media screen {
+  .page { box-shadow: 0 2mm 8mm rgba(0,0,0,.15); }
+  .toolbar { text-align: center; margin: 6mm 0 0; font: 11pt var(--font); }
+}

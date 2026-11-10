@@ -1,0 +1,189 @@
+diff --git a/app/src/main/java/com/example/data/Models.kt b/app/src/main/java/com/example/data/Models.kt
+index 50498b7..c0d2184 100644
+--- a/app/src/main/java/com/example/data/Models.kt
++++ b/app/src/main/java/com/example/data/Models.kt
+@@ -26,8 +26,8 @@ data class ExamConfig(
+   val examType: String = "term",
+   val subject: String = "english",
+   val itemCount: Int = 50,
+-  val mapehComp1Items: Int = 13,
+-  val mapehComp2Items: Int = 12,
++  val mapehComp1Items: Int = 12,
++  val mapehComp2Items: Int = 13,
+   val activeSectionLabel: String = "",
+   val answerKey: String = "",
+   @ServerTimestamp val createdAt: Timestamp? = null,
+@@ -573,13 +573,26 @@ object DepEdCalculator {
+     return proficiencyFromPct(pct)
+   }
+ 
++  /** Default passing mark: 60% raw score (= 75 transmuted under DepEd's grading table). */
++  const val PASSING_FRACTION = 0.60
++
++  /** Item remark from the error rate (percent of learners who got the item wrong). */
++  fun itemRemark(errorRatePct: Double): String {
++    return when {
++      errorRatePct > 50.0 -> "Critical Competency for Review"
++      errorRatePct > 25.0 -> "Least Mastered"
++      else -> "Mastered"
++    }
++  }
++
+   fun proficiencyFromPct(pct: Double): String {
+     return when {
+       pct >= 96.0 -> "Mastered"
+       pct >= 86.0 -> "Closely Approximating Mastery"
+       pct >= 66.0 -> "Moving Towards Mastery"
+-      pct >= 35.0 -> "Average / Low Mastery"
+-      pct >= 15.0 -> "Very Low Mastery"
++      pct >= 35.0 -> "Average Mastery"
++      pct >= 15.0 -> "Low Mastery"
++      pct >= 5.0 -> "Very Low Mastery"
+       else -> "Absolutely No Mastery"
+     }
+   }
+@@ -668,29 +681,31 @@ object DepEdCalculator {
+       }
+ 
+     val itemCorrectCounts = IntArray(totalItems + 1)
++    // Learners with no recorded answer for an item are left out of that item's analysis
++    // (never guessed). itemAnsweredCounts holds how many learners were counted per item.
++    val itemAnsweredCounts = IntArray(totalItems + 1)
+     val totalStudents = sortedRoster.size
+ 
+     val evaluatedStudents = sortedRoster.map { student ->
+       val score = student.score.coerceIn(0, totalItems)
+       val pct = round((score.toDouble() / totalItems.toDouble()) * 100.0, 2)
+       val prof = proficiency(score, totalItems)
+-      val remark = when {
+-        score >= totalItems * 0.60 -> "Mastered"
+-        score >= totalItems * 0.35 -> "Low Mastery"
+-        else -> "Very Low"
+-      }
++      val remark = if (score >= totalItems * PASSING_FRACTION) "Passed" else "Failed"
+ 
+       for (i in 1..totalItems) {
+         val hasExplicitResponse =
+           student.itemResponses.length >= i &&
+             student.itemResponses[i - 1].uppercaseChar() in 'A'..'D'
+-        val isCorrect = if (hasExplicitResponse) {
+-          student.itemResponses[i - 1].uppercaseChar() == answerKey[i - 1].uppercaseChar()
+-        } else {
+-          (i + score) % 3 == 0
+-        }
+-        if (isCorrect) {
+-          itemCorrectCounts[i]++
++        // A learner counts toward an item when their record has item responses
++        // (a blank inside a full response string counts as wrong). Score-only records are skipped.
++        val hasAnyResponses = student.itemResponses.isNotBlank()
++        if (hasAnyResponses) {
++          itemAnsweredCounts[i]++
++          if (hasExplicitResponse &&
++            student.itemResponses[i - 1].uppercaseChar() == answerKey[i - 1].uppercaseChar()
++          ) {
++            itemCorrectCounts[i]++
++          }
+         }
+       }
+ 
+@@ -710,10 +725,11 @@ object DepEdCalculator {
+ 
+     val itemRows = (1..totalItems).map { i ->
+       val correct = itemCorrectCounts[i]
+-      val incorrect = (totalStudents - correct).coerceAtLeast(0)
++      val answered = itemAnsweredCounts[i]
++      val incorrect = (answered - correct).coerceAtLeast(0)
+       val pct =
+-        if (totalStudents > 0) {
+-          round((correct.toDouble() / totalStudents.toDouble()) * 100.0, 2)
++        if (answered > 0) {
++          round((correct.toDouble() / answered.toDouble()) * 100.0, 2)
+         } else {
+           0.0
+         }
+@@ -722,11 +738,11 @@ object DepEdCalculator {
+         correctCount = correct,
+         incorrectCount = incorrect,
+         percentCorrect = pct,
+-        remark = proficiencyFromPct(pct),
++        remark = if (answered > 0) itemRemark(100.0 - pct) else "No item data",
+       )
+     }
+ 
+-    val passingThreshold = totalItems * 0.60
++    val passingThreshold = totalItems * PASSING_FRACTION
+     val passingCount = evaluatedStudents.count { it.score >= passingThreshold }
+     val denom = evaluatedStudents.size.coerceAtLeast(1)
+     val avgScore = round(evaluatedStudents.sumOf { it.score }.toDouble() / denom, 2)
+@@ -787,8 +803,9 @@ object DepEdCalculator {
+     }
+ 
+     val errorRows = baseReport.itemAnalysis.map { row ->
+-      val errPct = if (totalStudents > 0) {
+-        round((row.incorrectCount.toDouble() / totalStudents.toDouble()) * 100.0, 2)
++      val answered = row.correctCount + row.incorrectCount
++      val errPct = if (answered > 0) {
++        round((row.incorrectCount.toDouble() / answered.toDouble()) * 100.0, 2)
+       } else {
+         0.0
+       }
+diff --git a/app/src/main/java/com/example/ui/ExamViewModel.kt b/app/src/main/java/com/example/ui/ExamViewModel.kt
+index cbfe7b1..8da711b 100644
+--- a/app/src/main/java/com/example/ui/ExamViewModel.kt
++++ b/app/src/main/java/com/example/ui/ExamViewModel.kt
+@@ -291,8 +291,8 @@ class ExamViewModel(
+         examType = "summative",
+         subject = "mapeh-music-arts",
+         itemCount = 25,
+-        mapehComp1Items = 13,
+-        mapehComp2Items = 12,
++        mapehComp1Items = 12,
++        mapehComp2Items = 13,
+         answerKey = DepEdCalculator.defaultAnswerKey(25)
+       )
+       saveConfigInternal(updated)
+diff --git a/app/src/test/java/com/example/data/DepEdCalculatorRulesTest.kt b/app/src/test/java/com/example/data/DepEdCalculatorRulesTest.kt
+new file mode 100644
+index 0000000..86d816d
+--- /dev/null
++++ b/app/src/test/java/com/example/data/DepEdCalculatorRulesTest.kt
+@@ -0,0 +1,39 @@
++package com.example.data
++
++import org.junit.Assert.assertEquals
++import org.junit.Test
++
++/** Locks the approved DepEd rules (Nov 10, 2026). Pure JVM: no Firebase or Android needed. */
++class DepEdCalculatorRulesTest {
++
++  @Test
++  fun proficiencyUsesSevenBands() {
++    assertEquals("Mastered", DepEdCalculator.proficiencyFromPct(96.0))
++    assertEquals("Closely Approximating Mastery", DepEdCalculator.proficiencyFromPct(86.0))
++    assertEquals("Moving Towards Mastery", DepEdCalculator.proficiencyFromPct(66.0))
++    assertEquals("Average Mastery", DepEdCalculator.proficiencyFromPct(35.0))
++    assertEquals("Low Mastery", DepEdCalculator.proficiencyFromPct(20.0))
++    assertEquals("Very Low Mastery", DepEdCalculator.proficiencyFromPct(5.0))
++    assertEquals("Absolutely No Mastery", DepEdCalculator.proficiencyFromPct(4.99))
++  }
++
++  @Test
++  fun itemRemarkUsesErrorRate() {
++    assertEquals("Critical Competency for Review", DepEdCalculator.itemRemark(50.01))
++    assertEquals("Least Mastered", DepEdCalculator.itemRemark(50.0))
++    assertEquals("Least Mastered", DepEdCalculator.itemRemark(25.01))
++    assertEquals("Mastered", DepEdCalculator.itemRemark(25.0))
++  }
++
++  @Test
++  fun summativeMapehDefaultSplitIsTwelveThenThirteen() {
++    val config = ExamConfig()
++    assertEquals(12, config.mapehComp1Items)
++    assertEquals(13, config.mapehComp2Items)
++  }
++
++  @Test
++  fun passingMarkIsSixtyPercent() {
++    assertEquals(0.60, DepEdCalculator.PASSING_FRACTION, 0.0001)
++  }
++}
