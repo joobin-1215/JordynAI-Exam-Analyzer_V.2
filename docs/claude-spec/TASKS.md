@@ -83,5 +83,8 @@ Multi-level corner search, 150 ms checks, 2-frame stability, darkness ≥ 0.40 r
 Android: Credential Manager "Sign in with Google" using the EXISTING Firebase/OAuth setup (do not change the package name, SHA-1 or Firebase project). Per-email encrypted local database (Room + SQLCipher or per-account EncryptedFile), device password + recovery code, Switch account, Reset All per email behind a confirmation (Turnstile is web-only; on Android use Play Integrity only if the owner approves).
 **Checks:** never asks for an email password; email A can't open email B's data; new device = empty history; Reset All erases only the signed-in email.
 
+## T18. Names on sheets + Print Extra Sheets + Google-only sign-in (SPEC 7.4)
+Android: print learner names on named sheets; "Print Extra Sheets" with 4 learner pickers → 1 A4 page (PDF/Word); Google sign-in only (Credential Manager), per-email database keyed to the Android Keystore (no password). Do not change the package name, SHA-1 or Firebase project.
+
 ---
 When all tasks are done, tell the owner, and ask Claude to update `SPEC.md` / `DECISIONS.md` if anything had to differ.

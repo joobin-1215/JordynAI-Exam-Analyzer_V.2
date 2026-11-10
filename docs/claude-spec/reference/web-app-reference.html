@@ -206,7 +206,12 @@ function drawSheetCell(pen, o, learner, ox, oy) {
     pen.line(lx, Y(y + 0.6), X(x2), Y(y + 0.6), 0.15, "#000");
     if (printed) pen.text(printed, lx + 0.8, Y(y - 0.2), 6, { bold: true });
   };
-  field("Name:", 6, 23, 76, isKey ? "TEACHER'S ANSWER KEY" : "");   // learners write their name here (saved on the device only)
+  // Name line: printed for named sheets (from the class list on this device); blank sheets are written by hand
+  { const label = "Name:", lx = X(6) + pen.width(label, 6.2) + 1, room = X(76) - lx - 1.6;
+    const nm = isKey ? "TEACHER'S ANSWER KEY" : up(learner.name || "");
+    let pt = 6.4; while (nm && pt > 4.2 && pen.width(nm, pt) * 1.08 > room) pt -= 0.2;
+    pen.text(label, X(6), Y(23), 6.2); pen.line(lx, Y(23.6), X(76), Y(23.6), 0.15, "#000");
+    if (nm) pen.text(nm, lx + 0.8, Y(22.8), pt, { bold: true }); }
   field("Grade & Section:", 6, 27.6, 76, blank ? "" : (o.gradeSection || ""));
   field("Subject:", 6, 32.2, 52, o.subject || ""); field("Date:", 54, 32.2, 76, "");
   field("Exam:", 6, 36.8, 52, o.exam || ""); field("Score:", 54, 36.8, 70, "");
@@ -221,7 +226,7 @@ function drawSheetCell(pen, o, learner, ox, oy) {
     if (bits) bits.forEach((bit, i) => pen.rect(X(D.x0 + i * D.step), Y(D.y), D.size, D.size, bit ? { fill: "#000" } : { stroke: "#000", lw: 0.15 }));
   }
   pen.text("Shade the circle of your answer FULLY and darkly. Use a pencil or black pen. One answer per number.", X(52.5), Y(41.3), 4.8, { align: "center" });
-  pen.text(blank ? "No check or X marks. Write your NAME and your CODE (ask your teacher)." : "No check or X marks. Write your NAME (Last, First) on the Name line.", X(52.5), Y(43.4), 4.8, { align: "center" });
+  pen.text(blank ? "No check or X marks. Write your NAME and your CODE (ask your teacher)." : (learner.name ? "No check or X marks. Make sure the NAME and CODE on this sheet are yours." : "No check or X marks. Write your NAME (Last, First) on the Name line."), X(52.5), Y(43.4), 4.8, { align: "center" });
   const fs = Math.max(4.6, Math.min(9, L.b * 1.45)), nf = Math.max(5.4, Math.min(10, L.b * 1.7));
   for (let c = 0; c < L.cols; c++) {
     const start = c * L.rows + 1; if (start > o.n) break;
@@ -238,7 +243,7 @@ function drawSheetCell(pen, o, learner, ox, oy) {
       });
     }
   }
-  pen.text(blank ? "Extra / late-enrollee answer sheet · Do not fold. Keep the four black corners clean." : (isKey ? "TEACHER'S ANSWER KEY · scan this first" : "Write your name clearly. Do not fold. Keep the black corners and CODE dots clean."), X(52.5), Y(144), 4.3, { align: "center", color: "#777777" });
+  pen.text(blank ? "Extra / late-enrollee answer sheet · Do not fold. Keep the four black corners clean." : (isKey ? "TEACHER'S ANSWER KEY · scan this first" : (learner.name ? "Do not fold. Keep the black corners and CODE dots clean." : "Write your name clearly. Do not fold. Keep the black corners and CODE dots clean.")), X(52.5), Y(144), 4.3, { align: "center", color: "#777777" });
 }
 function drawPage(pen, o, cells) {
   pen.dash(true); pen.line(105, 0, 105, 297, 0.3, "#888888"); pen.line(0, 148.5, 210, 148.5, 0.3, "#888888"); pen.dash(false);
@@ -483,8 +488,23 @@ const Acct = {
   async use(email, via) { this.email = String(email).trim().toLowerCase(); this.id = await this.idFor(this.email); this.hint = maskEmail(this.email); this.via = via; imgStore.close(); },
   clear() { this.id = this.email = this.hint = this.via = ""; imgStore.close(); },
   list() { try { return JSON.parse(localStorage.getItem(ACCTS_KEY) || "[]"); } catch (e) { return []; } },
-  remember() { if (!this.id) return; const l = this.list().filter(a => a.id !== this.id); l.unshift({ id: this.id, hint: this.hint, last: Date.now() }); try { localStorage.setItem(ACCTS_KEY, JSON.stringify(l.slice(0, 20))); } catch (e) {} },
+  useId(id, hint, via) { this.id = id; this.hint = hint; this.email = ""; this.via = via; imgStore.close(); },
+  remember() { if (!this.id) return; const old = this.list().find(a => a.id === this.id) || {}; const l = this.list().filter(a => a.id !== this.id); l.unshift({ id: this.id, hint: this.hint, last: Date.now(), g: this.via === "google" ? Date.now() : old.g || 0 }); try { localStorage.setItem(ACCTS_KEY, JSON.stringify(l.slice(0, 20))); } catch (e) {} },
   forget(id) { try { localStorage.setItem(ACCTS_KEY, JSON.stringify(this.list().filter(a => a.id !== id))); } catch (e) {} },
+};
+const GOOGLE_ONLY = !!CFG.googleClientId;          // Google sign-in replaces passwords once the Web Client ID is set
+const OFFLINE_GRACE_MS = 24 * 3600 * 1000;           // no internet: open an account that signed in with Google here in the last 24 h
+/* Device key: a random AES key made by this browser, stored in IndexedDB as NON-extractable (it can be used here, never read out or copied). */
+const DeviceKey = {
+  async get() {
+    const db = await new Promise((res, rej) => { const rq = indexedDB.open("jordynai_keys", 1); rq.onupgradeneeded = () => rq.result.createObjectStore("k"); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); });
+    const io = (mode, fn) => new Promise((res, rej) => { const t = db.transaction("k", mode); const rq = fn(t.objectStore("k")); t.oncomplete = () => res(rq.result); t.onerror = () => rej(t.error); });
+    let k = await io("readonly", st => st.get("device"));
+    if (!k) { k = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]); await io("readwrite", st => st.put(k, "device")); }
+    db.close(); return k;
+  },
+  async wrap(rawDek) { return aesEnc(await this.get(), rawDek); },
+  async unwrap(w) { return aesDec(await this.get(), w); },
 };
 const vaultKey = () => (Acct.id ? "jordynai_vault:" + Acct.id : VAULT_KEY);
 const PBKDF2_ITER = 310000;
@@ -564,10 +584,22 @@ const Vault = {
     Object.keys(map).forEach(k => localStorage.removeItem(k));
     return code;
   },
+  /* Google mode: no password; the data key is locked with this browser's device key (+ the admin lock) */
+  async createDevice() {
+    const rawDek = rand(32), wraps = { dev: await DeviceKey.wrap(rawDek) };
+    const ak = await this.loadAdminKey(); if (ak) wraps.admin = await wrapForAdmin(rawDek, ak);
+    localStorage.setItem(vaultKey(), JSON.stringify({ v: 1, wraps, data: null }));
+    this.rawDek = rawDek; this.wraps = wraps; this.unlockedBy = "device";
+    this.dek = await crypto.subtle.importKey("raw", rawDek, "AES-GCM", false, ["encrypt", "decrypt"]);
+    this.map = {}; await this.save();
+  },
+  hasDevice() { try { return !!JSON.parse(localStorage.getItem(vaultKey())).wraps.dev; } catch (e) { return false; } },
+  async addDevice() { if (!this.rawDek || this.wraps.dev) return; this.wraps.dev = await DeviceKey.wrap(this.rawDek); await this.save(); },
   async unlock(kind, secret) {
     const v = JSON.parse(localStorage.getItem(vaultKey())), w = v.wraps;
     let raw;
-    if (kind === "password") raw = await unwrapWithSecret(w.pw, secret);
+    if (kind === "device") raw = await DeviceKey.unwrap(w.dev);
+    else if (kind === "password") raw = await unwrapWithSecret(w.pw, secret);
     else if (kind === "recovery") raw = await unwrapWithSecret(w.rc, normCode(secret));
     else { const ak = await this.loadAdminKey(); if (!ak || !w.admin) throw new Error("no-admin"); raw = await unwrapForAdmin(w.admin, ak, secret); }
     await this.open(raw, w, kind);
@@ -1179,6 +1211,7 @@ function RosterPage({ label, initial, onSave, onBack, onDownload, onCodeList, fl
   const [checking, setChecking] = useState(false);
   const [bad, setBad] = useState({ B: new Set(), G: new Set() });
   const [saved, setSaved] = useState(!!(initial && (initial.boys || []).some(Boolean)));
+  const [extra, setExtra] = useState(["", "", "", ""]);   // Print Extra Sheets: up to 4 learners = 1 A4 page
   const [grade, sec] = [String(label).split(" – ")[0], sectionOf(label)];
   const saveLabel = `Save Learners in ${grade} – Section ${sec}`;
 
@@ -1255,7 +1288,7 @@ function RosterPage({ label, initial, onSave, onBack, onDownload, onCodeList, fl
         </div>
         {saved && !dirty && total > 0 && (
           <div className="mt-4 rounded-xl border border-amber-400/40 bg-amber-400/10 p-3">
-            <p className="text-sm text-amber-100 mb-2">📄 Download named answer sheets: <b>{count(boys)} boys + {count(girls)} girls + 1 ANSWER KEY = {total + 1} sheets</b> on {Math.ceil((total + 1) / 4)} A4 page(s). Each sheet shows the learner's CODE, grade & section, subject and exam (no names, for privacy). Use the Code List to hand out the right sheet to each learner.</p>
+            <p className="text-sm text-amber-100 mb-2">📄 Download named answer sheets: <b>{count(boys)} boys + {count(girls)} girls + 1 ANSWER KEY = {total + 1} sheets</b> on {Math.ceil((total + 1) / 4)} A4 page(s). Each sheet is printed with the learner's <b>NAME and CODE</b>, grade & section, subject and exam, so you can hand them out right away. (Names stay on paper and on this device; the scanner only sends codes to Claude.)</p>
             <div className="flex flex-wrap gap-2">
               <button onClick={() => onDownload({ boys, girls }, "pdf")} className="px-4 py-2 rounded-lg bg-amber-400 text-slate-950 font-bold">⬇ Answer Sheets for {sec} (PDF)</button>
               <button onClick={() => onDownload({ boys, girls }, "docx")} className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold">⬇ Word (.docx)</button>
@@ -1269,6 +1302,27 @@ function RosterPage({ label, initial, onSave, onBack, onDownload, onCodeList, fl
         {Col({ g: "B", arr: boys, tone: "bg-blue-700/80", title: "BOYS (B-1 to B-50)" })}
         {Col({ g: "G", arr: girls, tone: "bg-pink-600/80", title: "GIRLS (G-1 to G-50)" })}
       </div>
+      {saved && !dirty && total > 0 && (() => {
+        const opts = [["KEY", "TEACHER'S ANSWER KEY"], ...boys.map((v, i) => v && [`B-${i + 1}`, v]).filter(Boolean), ...girls.map((v, i) => v && [`G-${i + 1}`, v]).filter(Boolean)];
+        const picked = extra.filter(Boolean).map(c => ({ code: c, name: c === "KEY" ? "" : (opts.find(o => o[0] === c) || [])[1] || "" }));
+        return <Card className="border border-rose-400/40">
+          <h3 className="font-black text-white mb-1">🖨️ Print Extra Sheets</h3>
+          <p className="text-xs text-slate-400 mb-3">A learner's sheet got wet or torn? Pick up to <b>4 learners</b> (4 sheets fit on one A4 page). Their new sheets get the same name and code, so the scanner still knows them.</p>
+          <div className="grid sm:grid-cols-2 gap-2">
+            {extra.map((v, i) => <div key={i}><Label>Sheet {i + 1}</Label>
+              <Select value={v} onChange={e => setExtra(x => x.map((y, j) => j === i ? e.target.value : y))}>
+                <option value="">— none —</option>
+                {opts.map(([c, nm]) => <option key={c} value={c}>{c} · {nm}</option>)}
+              </Select></div>)}
+          </div>
+          <div className="flex flex-wrap gap-2 mt-3">
+            <button disabled={!picked.length} onClick={() => onDownload({ boys, girls }, "pdf", picked)} className="px-4 py-2 rounded-lg bg-amber-400 text-slate-950 font-bold disabled:opacity-40">⬇ Extra Sheets (PDF)</button>
+            <button disabled={!picked.length} onClick={() => onDownload({ boys, girls }, "docx", picked)} className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold disabled:opacity-40">⬇ Word (.docx)</button>
+            {extra.some(Boolean) && <button onClick={() => setExtra(["", "", "", ""])} className="px-3 py-2 rounded-lg bg-white/10 text-sm">Clear</button>}
+          </div>
+          {picked.length > 0 && <p className="text-[11px] text-slate-400 mt-1">{picked.length} sheet(s) on 1 A4 page: {picked.map(p => p.code).join(", ")}</p>}
+        </Card>;
+      })()}
     </div>
   );
 }
@@ -1402,14 +1456,29 @@ function Gate({ children }) {
     return () => { clearTimeout(idle.current); evs.forEach(e => window.removeEventListener(e, reset)); };
   }, [phase]);
 
-  function lockNow() { Vault.lock(); setA(""); setB(""); setErr(""); setMode("password"); setByAdmin(false); setPhase("locked"); }
+  function lockNow() { if (GOOGLE_ONLY && Vault.unlockedBy === "device") return switchAccount(); Vault.lock(); setA(""); setB(""); setErr(""); setMode("password"); setByAdmin(false); setPhase("locked"); }
   function switchAccount() { Vault.lock(); Acct.clear(); try { window.google && google.accounts && google.accounts.id.disableAutoSelect(); } catch (e) {} setA(""); setB(""); setErr(""); setEmail(""); setMode("password"); setByAdmin(false); setPhase("signin"); }
 
   // after Google (or the typed email) tells us WHO this is: open that email's data on this device, or start a new history
   const signedIn = async (mail, via) => {
     setErr(""); await Acct.use(mail, via);
+    if (GOOGLE_ONLY && via === "google") return openGoogle();
     setPhase(Vault.exists() ? "locked" : Vault.legacyExists() ? "legacy" : "setup");
   };
+  /* Google mode: no password. Known email on this device -> its data opens; new email -> new history. */
+  const openGoogle = async () => {
+    setBusy(true);
+    try {
+      if (Vault.exists()) {
+        if (!Vault.hasDevice()) { setBusy(false); return setPhase("locked"); }   // made with a password before: type it once
+        await Vault.unlock("device");
+      } else if (Vault.legacyExists()) { setBusy(false); return setPhase("legacy"); }
+      else await Vault.createDevice();
+      Acct.remember(); setPhase("open");
+    } catch (e) { setErr("This browser couldn't open your data (" + (e.message || "device key") + ")."); setPhase("signin"); }
+    setBusy(false);
+  };
+  const openOffline = async acc => { Acct.useId(acc.id, acc.hint, "offline"); return openGoogle(); };
   const typedEmail = () => {
     const m = email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m)) return setErr("Type a valid email address.");
@@ -1423,13 +1492,13 @@ function Gate({ children }) {
   };
   const unlock = async () => {
     if (!a) return; setBusy(true); setErr("");
-    try { await Vault.unlock(mode, a); Acct.remember(); setA(""); setByAdmin(mode !== "password"); setPhase("open"); }
+    try { await Vault.unlock(mode, a); if (GOOGLE_ONLY && Acct.via === "google") await Vault.addDevice(); Acct.remember(); setA(""); setByAdmin(mode !== "password"); setPhase("open"); }
     catch (e) { setErr(mode === "admin" ? (e.message === "no-admin" ? "No admin key is set up for this website yet." : "Wrong master password.") : mode === "recovery" ? "That recovery code doesn't match." : "Wrong password."); }
     setBusy(false);
   };
   const adopt = async () => {
     if (!a) return; setBusy(true); setErr("");
-    try { await Vault.adoptLegacy(a); Acct.remember(); setA(""); setPhase("open"); } catch (e) { setErr("Wrong password for the old data."); }
+    try { await Vault.adoptLegacy(a); if (GOOGLE_ONLY && Acct.via === "google") await Vault.addDevice(); Acct.remember(); setA(""); setPhase("open"); } catch (e) { setErr("Wrong password for the old data."); }
     setBusy(false);
   };
   const who = <div className="flex items-center justify-between bg-slate-900/60 rounded-xl px-3 py-2 mb-3 text-sm">
@@ -1453,8 +1522,16 @@ function Gate({ children }) {
       <GateShell>
         <h2 className="text-lg font-black text-white mb-1">👋 Sign in</h2>
         {!offline ? <>
-          <p className="text-sm text-slate-300 mb-3">Sign in with your Google account. Google checks your password on its own page: <b>this website never sees your email password.</b></p>
-          <GoogleButton onEmail={m => signedIn(m, "google")} onFail={m => { if (m === "offline") { setOffline(true); setErr("Google sign-in couldn't load (no internet?). You can still open accounts saved on this device."); } else setErr(m); }} />
+          <p className="text-sm text-slate-300 mb-3">Sign in with your Google account. No other password needed. Google checks your password on its own page: <b>this website never sees your email password.</b></p>
+          {busy && <p className="text-xs text-cyan-300 mb-2">Opening your data…</p>}
+          <GoogleButton onEmail={m => signedIn(m, "google")} onFail={m => { if (m === "offline") { setOffline(true); setErr(""); } else setErr(m); }} />
+        </> : GOOGLE_ONLY ? <>
+          <p className="text-sm text-slate-300 mb-3">No internet, so Google can't sign you in right now. Accounts that signed in with Google <b>on this device in the last 24 hours</b> can still open:</p>
+          <div className="space-y-2">
+            {known.filter(k => k.g && Date.now() - k.g < OFFLINE_GRACE_MS).map(k => <button key={k.id} disabled={busy} onClick={() => openOffline(k)} className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 font-bold text-sm">👤 {k.hint}</button>)}
+            {!known.some(k => k.g && Date.now() - k.g < OFFLINE_GRACE_MS) && <p className="text-xs text-amber-200">None yet. Connect to the internet and sign in with Google.</p>}
+            <button onClick={() => window.location.reload()} className="w-full py-2 rounded-xl bg-cyan-500/20 text-cyan-200 text-sm">↻ Try Google again</button>
+          </div>
         </> : <>
           <p className="text-sm text-slate-300 mb-3">{CFG.googleClientId ? "No internet: type the email you used on this device." : "Type your email. Then make a NEW password just for this app."} <b className="text-amber-200">Never type your Gmail/email password here.</b></p>
           <input type="email" autoComplete="email" placeholder="you@deped.gov.ph" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && typedEmail()} className="w-full bg-slate-900/70 border border-white/10 rounded-lg px-3 py-2.5 text-slate-100 outline-none focus:ring-2 focus:ring-cyan-400" />
@@ -1474,7 +1551,7 @@ function Gate({ children }) {
       <PwInput autoFocus placeholder="Old password" value={a} onChange={e => setA(e.target.value)} onKeyDown={e => e.key === "Enter" && adopt()} />
       {err && <p className="text-sm text-red-300 mt-2">{err}</p>}
       <button disabled={busy || !a} onClick={adopt} className="w-full mt-3 py-3 rounded-xl bg-cyan-500 text-slate-950 font-black disabled:opacity-40">{busy ? "Moving…" : "Move my old data here"}</button>
-      <button onClick={() => { setA(""); setErr(""); setPhase("setup"); }} className="w-full mt-2 py-2.5 rounded-xl bg-white/10 font-bold text-sm">Start a new history instead</button>
+      <button onClick={() => { setA(""); setErr(""); if (GOOGLE_ONLY && Acct.via === "google") openGoogle(); else setPhase("setup"); }} className="w-full mt-2 py-2.5 rounded-xl bg-white/10 font-bold text-sm">Start a new history instead</button>
     </GateShell>
   );
   if (phase === "setup") return (
@@ -1494,6 +1571,7 @@ function Gate({ children }) {
   return (
     <GateShell>
       {Acct.id && who}
+      {GOOGLE_ONLY && Acct.via === "google" && <p className="text-xs text-amber-100 bg-amber-500/10 border border-amber-400/30 rounded-lg p-2 mb-3">This email's data on this device was locked with a password before Google sign-in. Type it <b>one last time</b>; after this, Google alone opens it.</p>}
       <div className="flex gap-1 bg-slate-900/60 rounded-xl p-1 mb-3 text-xs">
         {[["password", "Password"], ["recovery", "Recovery code"], ...(hasAdmin ? [["admin", "Admin"]] : [])].map(([k, l]) =>
           <button key={k} onClick={() => { setMode(k); setA(""); setErr(""); }} className={`flex-1 py-2 rounded-lg ${mode === k ? "bg-cyan-500 text-slate-950 font-bold" : "text-slate-300"}`}>{l}</button>)}
@@ -1529,6 +1607,7 @@ function SecurityCard({ flash, saveFile }) {
     } catch (e) { setMsg("Your current password is wrong."); }
     setBusy(false);
   };
+  const googleMode = Vault.unlockedBy === "device";
   const makeAdminKey = async () => {
     const p = pwProblem(m1, m2); if (p) return setAdminMsg(p);
     if (m1.length < 12) return setAdminMsg("Use at least 12 characters for the master password.");
@@ -1540,19 +1619,20 @@ function SecurityCard({ flash, saveFile }) {
   return (
     <div id="security" className="scroll-mt-24"><Card>
       <h3 className="font-black text-white mb-1">🛡️ Security</h3>
-      <p className="text-xs text-slate-400 mb-3">Data on this device is encrypted. Auto-lock after 15 minutes without use. Admin lock: {Vault.adminKey ? <b className="text-emerald-300">ON</b> : <b className="text-amber-300">not set up</b>}.</p>
+      {googleMode && <p className="text-sm text-emerald-200 mb-2">✔ Signed in with Google as <b>{Acct.hint}</b>. No password needed: Google checks who you are, and this email's data is locked to this browser on this device.</p>}
+      <p className="text-xs text-slate-400 mb-3">Data on this device is encrypted. {googleMode ? "After 15 minutes without use, you sign in with Google again." : "Auto-lock after 15 minutes without use."} Admin lock: {Vault.adminKey ? <b className="text-emerald-300">ON</b> : <b className="text-amber-300">not set up</b>}.</p>
       <div className="flex flex-wrap gap-2 mb-4">
         <button onClick={() => window.__jordynLock && window.__jordynLock()} className="px-3 py-1.5 text-xs rounded-lg bg-white/10">🔒 Lock now</button>
-        <button onClick={async () => setCode(await Vault.newRecovery())} className="px-3 py-1.5 text-xs rounded-lg bg-white/10">📝 New recovery code</button>
+        {!googleMode && <button onClick={async () => setCode(await Vault.newRecovery())} className="px-3 py-1.5 text-xs rounded-lg bg-white/10">📝 New recovery code</button>}
       </div>
       {code && <div className="mb-4"><RecoveryShow code={code} onDone={() => setCode("")} /></div>}
-      <div className="grid sm:grid-cols-3 gap-2">
+      {!googleMode && <><div className="grid sm:grid-cols-3 gap-2">
         {Vault.unlockedBy === "password" && <PwInput placeholder="Current password" value={cur} onChange={e => setCur(e.target.value)} />}
         <PwInput placeholder="New password" value={p1} onChange={e => setP1(e.target.value)} />
         <PwInput placeholder="New password again" value={p2} onChange={e => setP2(e.target.value)} />
       </div>
       <button disabled={busy} onClick={change} className="mt-2 px-4 py-2 text-sm rounded-lg bg-cyan-500 text-slate-950 font-bold disabled:opacity-40">Change password</button>
-      {msg && <p className="text-xs text-slate-300 mt-1">{msg}</p>}
+      {msg && <p className="text-xs text-slate-300 mt-1">{msg}</p>}</>}
       <div className="mt-5 rounded-xl border border-amber-400/40 bg-amber-400/5 p-3">
         <h4 className="text-sm font-black text-amber-200">👑 Admin only: create the admin master key</h4>
         <p className="text-xs text-slate-400 mt-2">Choose your admin master password (12+ characters). The app creates <b>admin-key.json</b>, which lets every device add an admin lock that only your master password opens. The password itself is never saved. If you lose it, make a new key; devices update on their next unlock.</p>
@@ -1673,17 +1753,18 @@ function App() {
   };
   const learnersOf = rs => {
     const list = [{ code: "KEY", name: "" }];
-    rs.boys.forEach((v, i) => v && list.push({ code: `B-${i + 1}`, name: "" }));
-    rs.girls.forEach((v, i) => v && list.push({ code: `G-${i + 1}`, name: "" }));
+    rs.boys.forEach((v, i) => v && list.push({ code: `B-${i + 1}`, name: v }));
+    rs.girls.forEach((v, i) => v && list.push({ code: `G-${i + 1}`, name: v }));
     return list;
   };
   const downloadCodeList = (label, rs) => saveFile(buildCodeListHtml(profile, label, rs), `Code_List_${String(label).replace(/[^\w]+/g, "_")}.html`, "text/html;charset=utf-8");
-  const downloadSheets = async (label, rs, kind = "pdf") => {
+  const downloadSheets = async (label, rs, kind = "pdf", extra = null) => {
     const o = { profile, gradeSection: label, subject: subj.label, exam: `${examLabel} · ${term}`, n };
-    const base = `DepEd_Answer_Sheets_${String(label).replace(/[^\w]+/g, "_")}_${n}items`;
+    const base = `DepEd_Answer_Sheets_${String(label).replace(/[^\w]+/g, "_")}_${n}items${extra ? "_EXTRA_" + extra.map(x => x.code).join("_") : ""}`;
+    const list = extra || learnersOf(rs);
     try {
-      if (kind === "pdf") await saveFile(sheetsPdf(o, learnersOf(rs)), base + ".pdf", "application/pdf");
-      else await saveFile(await sheetsDocx(o, learnersOf(rs)), base + ".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      if (kind === "pdf") await saveFile(sheetsPdf(o, list), base + ".pdf", "application/pdf");
+      else await saveFile(await sheetsDocx(o, list), base + ".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     } catch (e) { flash("Couldn't make the file: " + (e.message || "try again")); }
   };
   const rosterCount = label => { const r = rosters[label]; return r ? r.boys.filter(Boolean).length + r.girls.filter(Boolean).length : 0; };
@@ -1972,7 +2053,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
           </div>
         )}
 
-        {rosterView && <RosterPage key={rosterView} label={rosterView} initial={rosters[rosterView]} flash={flash} onBack={() => setRosterView(null)} onSave={rs => saveRoster(rosterView, rs)} onDownload={(rs, kind) => downloadSheets(rosterView, rs, kind)} onCodeList={rs => downloadCodeList(rosterView, rs)} />}
+        {rosterView && <RosterPage key={rosterView} label={rosterView} initial={rosters[rosterView]} flash={flash} onBack={() => setRosterView(null)} onSave={rs => saveRoster(rosterView, rs)} onDownload={(rs, kind, extra) => downloadSheets(rosterView, rs, kind, extra)} onCodeList={rs => downloadCodeList(rosterView, rs)} />}
         {!rosterView && <>
         {/* TABS */}
         <nav className="flex flex-wrap gap-1 glass rounded-2xl p-1">

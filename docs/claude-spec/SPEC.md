@@ -1,7 +1,7 @@
 # JordynAI Exam Analyzer: Claude Design Spec (source of truth)
 
 Owner: **Joven R. Castro**, Teacher II (MAPEH), Leon Garcia Sr. National High School, Schools Division of Davao City, Region XI.
-Spec version: **1.5 · Nov 10, 2026** (email sign-in per device, human check on Reset All) (aligned with DepEd Order No. 15, s. 2026, as reported; verify against the official text). This file overrides older plans and existing code (see `/AGENTS.md`).
+Spec version: **1.6 · Nov 10, 2026** (Google replaces passwords; names on sheets; Print Extra Sheets) (aligned with DepEd Order No. 15, s. 2026, as reported; verify against the official text). This file overrides older plans and existing code (see `/AGENTS.md`).
 
 Two builds follow this spec:
 - **Android app** (this repo: Kotlin, Jetpack Compose, Firebase), built by Google AI Studio.
@@ -157,6 +157,14 @@ Grade (Kinder, Grade 1–12) plus Section (uppercase). Saved classes appear as q
 - **RESET ALL DATA (History tab)** erases only the signed-in email's data on this device and first requires **Cloudflare Turnstile "Verify you are human"**. Site key is public (`window.JORDYNAI_CONFIG.turnstileSiteKey`); until set, Cloudflare's test key is used and the box says "Test mode". Without a server, the check runs in the browser only (blocks bots and accidents, not a determined person with the device password).
 - Header shows the signed-in email (masked) with Lock and Switch account.
 - **Change control:** only the owner's GitHub account (joobin-1215) may push to either repo. No collaborators, no deploy keys, no other accounts. AI Studio pushes only through the owner's linked GitHub account and only after the owner approves.
+
+## 7.4 Google replaces passwords; names on sheets; Print Extra Sheets (owner decision, Nov 10)
+- When the Web Client ID is set, the start screen is **only "Sign in with Google"**: no device password, no recovery code. Each email's data key is locked with a **non-extractable device key** kept by this browser (IndexedDB `jordynai_keys`) plus the admin lock. Known email on this device → opens; new email → new empty history. After 15 minutes idle → sign in with Google again.
+- Data made earlier with a password: the password is asked **once**, then Google alone opens it.
+- No internet: accounts that signed in with Google on this device in the **last 24 hours** can still open (classroom scanning without Wi-Fi).
+- Without a Client ID the older email + device-password flow stays as a fallback.
+- **Named answer sheets now print the learner's NAME** (as typed in the class list) on the Name line, plus the CODE. Blank sheets still have an empty Name line. "Ask Claude" crops still blank out the Name line (codes only to AI).
+- **Print Extra Sheets** (bottom of the class list page, after saving): 4 drop-downs of that section's learners (plus the ANSWER KEY) → 1 A4 page with those 4 sheets, PDF or Word. Same name and code, so scanning still matches.
 
 ## 8. Scanner
 - Portrait viewfinder in a 1 : 1.414 frame with corner guides and the label "One quarter-sheet, portrait, 4 corners in view". One sheet per photo.
