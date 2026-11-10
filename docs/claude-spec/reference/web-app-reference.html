@@ -11,6 +11,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
   html, body { margin: 0; min-height: 100vh; color: #e2e8f0; font-family: Inter, system-ui, sans-serif;
     background: linear-gradient(135deg, #020617 0%, #0f172a 45%, #1e1b4b 100%); background-attachment: fixed; }
@@ -155,7 +156,7 @@ const GEO = {
   itemsTop: 46.2, itemsLeft: 6, colGap: 1.6,
   codeBox: { x: 79, y: 19.5, w: 20, h: 18.5 },
   dots: { x0: 80.2, y: 33.4, size: 1.6, step: 2.0, count: 9 },                 // CODE dot strip inside the box
-  paperProbe: [[20, 138.6], [35, 138.6], [50, 138.6], [65, 138.6], [80, 138.6], [52.5, 41.9], [30, 20.5], [70, 20.5]],
+  paperProbe: [[20, 138.6], [35, 138.6], [50, 138.6], [65, 138.6], [80, 138.6], [3, 60], [3, 100], [101.5, 60], [101.5, 100]],   // margins only: never under handwriting
 };
 /* Dot code, 9 cells: [start=1, isGirl, isKey, n5 n4 n3 n2 n1 n0] -> B-1..B-63, G-1..G-63, KEY */
 function codeToBits(code) {
@@ -201,7 +202,7 @@ function drawSheetCell(pen, o, learner, ox, oy) {
     pen.line(lx, Y(y + 0.6), X(x2), Y(y + 0.6), 0.15, "#000");
     if (printed) pen.text(printed, lx + 0.8, Y(y - 0.2), 6, { bold: true });
   };
-  field("Name:", 6, 23, 76, isKey ? "TEACHER'S ANSWER KEY" : "");
+  field("Name:", 6, 23, 76, isKey ? "TEACHER'S ANSWER KEY" : "");   // learners write their name here (saved on the device only)
   field("Grade & Section:", 6, 27.6, 76, blank ? "" : (o.gradeSection || ""));
   field("Subject:", 6, 32.2, 52, o.subject || ""); field("Date:", 54, 32.2, 76, "");
   field("Exam:", 6, 36.8, 52, o.exam || ""); field("Score:", 54, 36.8, 70, "");
@@ -216,7 +217,7 @@ function drawSheetCell(pen, o, learner, ox, oy) {
     if (bits) bits.forEach((bit, i) => pen.rect(X(D.x0 + i * D.step), Y(D.y), D.size, D.size, bit ? { fill: "#000" } : { stroke: "#000", lw: 0.15 }));
   }
   pen.text("Shade the circle of your answer FULLY and darkly. Use a pencil or black pen. One answer per number.", X(52.5), Y(41.3), 4.8, { align: "center" });
-  pen.text(blank ? "No check or X marks. Write your CODE in the box (ask your teacher)." : "No check or X marks. Do not write your name; your CODE identifies you.", X(52.5), Y(43.4), 4.8, { align: "center" });
+  pen.text(blank ? "No check or X marks. Write your NAME and your CODE (ask your teacher)." : "No check or X marks. Write your NAME (Last, First) on the Name line.", X(52.5), Y(43.4), 4.8, { align: "center" });
   const fs = Math.max(4.6, Math.min(9, L.b * 1.45)), nf = Math.max(5.4, Math.min(10, L.b * 1.7));
   for (let c = 0; c < L.cols; c++) {
     const start = c * L.rows + 1; if (start > o.n) break;
@@ -224,7 +225,7 @@ function drawSheetCell(pen, o, learner, ox, oy) {
     ["A", "B", "C", "D"].forEach((l, k) => pen.text(l, X(cx + noW + L.b / 2 + k * (L.b + L.gap)), Y(GEO.itemsTop + 2.4), Math.max(5, fs), { align: "center", bold: true }));
     for (let q = start; q <= Math.min(start + L.rows - 1, o.n); q++) {
       const r = q - start, ry = GEO.itemsTop + 3.4 + r * L.rowH;
-      if (r % 2 === 0) pen.rect(X(cx), Y(ry), L.colW, L.rowH, { fill: "#eef0f8" });
+      if (r % 2 === 0) pen.rect(X(cx), Y(ry), L.colW, L.rowH, { fill: "#f6f7fb" });   // very light: prints as pale gray, never dark
       const cy = ry + L.rowH / 2;
       pen.text(String(q), X(cx + noW - 0.8), Y(cy + nf * 0.12), nf, { align: "right", bold: true });
       centers[q - 1].forEach(([bx], k) => {
@@ -233,7 +234,7 @@ function drawSheetCell(pen, o, learner, ox, oy) {
       });
     }
   }
-  pen.text(blank ? "Extra / late-enrollee answer sheet · Do not fold. Keep the four black corners clean." : (isKey ? "TEACHER'S ANSWER KEY · scan this first" : "Do not fold. Keep the four black corners and the CODE dots clean."), X(52.5), Y(144), 4.3, { align: "center", color: "#777777" });
+  pen.text(blank ? "Extra / late-enrollee answer sheet · Do not fold. Keep the four black corners clean." : (isKey ? "TEACHER'S ANSWER KEY · scan this first" : "Write your name clearly. Do not fold. Keep the black corners and CODE dots clean."), X(52.5), Y(144), 4.3, { align: "center", color: "#777777" });
 }
 function drawPage(pen, o, cells) {
   pen.dash(true); pen.line(105, 0, 105, 297, 0.3, "#888888"); pen.line(0, 148.5, 210, 148.5, 0.3, "#888888"); pen.dash(false);
@@ -310,9 +311,16 @@ function toGray(src, maxDim) {
 }
 /* Coarse corner search on a small image: dark, solid, square blobs at the 4 extremes. */
 function coarseCorners(G) {
-  const { g, W, H } = G; let sum = 0;
-  for (let i = 0; i < W * H; i++) sum += g[i];
-  const thr = Math.min(100, (sum / (W * H)) * 0.5);
+  let sum = 0; for (let i = 0; i < G.W * G.H; i++) sum += G.g[i];
+  const mean = sum / (G.W * G.H);
+  for (const f of [0.5, 0.62, 0.38, 0.75]) {           // try several darkness levels: works in bright AND dim rooms
+    const r = coarseCornersAt(G, Math.min(f >= 0.62 ? 125 : 100, mean * f));
+    if (r) return r;
+  }
+  return null;
+}
+function coarseCornersAt(G, thr) {
+  const { g, W, H } = G;
   const seen = new Uint8Array(W * H), blobs = [], area = W * H;
   for (let i = 0; i < W * H; i++) {
     if (seen[i] || g[i] > thr) continue;
@@ -401,6 +409,12 @@ function fillOf(G, map, cx, cy, r, thr) {
   return dark / tot;
 }
 
+/* Average darkness inside a circle: 0 = paper white, 1 = black. Erased smudges stay low; real shading is high. */
+function darknessOf(G, map, cx, cy, r, white) {
+  let sum = 0, tot = 0;
+  for (let i = -3; i <= 3; i++) for (let j = -3; j <= 3; j++) { const dx = i / 3 * r, dy = j / 3 * r; if (dx * dx + dy * dy > r * r) continue; const [x, y] = map(cx + dx, cy + dy); sum += lum(G, x, y); tot++; }
+  return Math.max(0, 1 - sum / tot / white);
+}
 /* Read a whole sheet. n = items on the sheet. */
 function readSheet(src, n) {
   const loc = locateSheet(src);
@@ -423,7 +437,8 @@ function readSheet(src, n) {
     const f = row.map(([cx]) => fillOf(G, map, cx, cy, r * 0.62, thr));
     fills.push(f);
     const order = [0, 1, 2, 3].sort((a, b) => f[b] - f[a]), top = f[order[0]], second = f[order[1]];
-    if (top >= 0.42 && second < 0.3) answers.push("ABCD"[order[0]]);
+    const deep = top >= 0.42 ? darknessOf(G, map, row[order[0]][0], cy, r * 0.55, white) : 0;
+    if (top >= 0.42 && second < 0.3 && deep >= 0.4) answers.push("ABCD"[order[0]]);
     else if (top < 0.22) answers.push(null);                                     // blank
     else { answers.push(null); flagged.push(qi + 1); }                           // double, light or erased
   });
@@ -434,12 +449,12 @@ function readSheet(src, n) {
   return { ok: true, answers, flagged, fills, code, bits, ringScore, layoutOk: ringScore > 0.35, paper, map, G, pts: loc.pts };
 }
 /* Straightened 1050 x 1485 crop (for thumbnails and the Claude backup). */
-function warpCrop(res, ppm = 5) {
-  const W = Math.round(GEO.W * ppm), H = Math.round(GEO.H * ppm);
+function warpCrop(res, ppm = 5, x0 = 0, y0 = 0, x1 = GEO.W, y1 = GEO.H) {
+  const W = Math.round((x1 - x0) * ppm), H = Math.round((y1 - y0) * ppm);
   const c = document.createElement("canvas"); c.width = W; c.height = H;
   const ctx = c.getContext("2d"), img = ctx.createImageData(W, H), k = ppm;
   for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) {
-    const [x, y] = res.map(u / k, v / k), L = lum(res.G, x, y), i = (v * W + u) * 4;
+    const [x, y] = res.map(x0 + u / k, y0 + v / k), L = lum(res.G, x, y), i = (v * W + u) * 4;
     img.data[i] = img.data[i + 1] = img.data[i + 2] = L; img.data[i + 3] = 255;
   }
   ctx.putImageData(img, 0, 0); return c;
@@ -542,6 +557,62 @@ const Vault = {
   lock() { clearTimeout(this.saveTimer); this.save(); this.map = null; this.dek = null; this.rawDek = null; this.wraps = null; this.unlockedBy = ""; },
   erase() { this.lock(); try { Object.keys(localStorage).filter(k => k.startsWith("jordynai_")).forEach(k => localStorage.removeItem(k)); } catch (e) {} },
 };
+
+
+/* ===================== SHEET IMAGES (IndexedDB on this device; encrypted with the password key on the website) ===================== */
+const NAME_STRIP = [5, 18.6, 78, 29.6];   // mm: Name + Grade & Section lines
+const imgStore = {
+  _db: null,
+  async db() {
+    if (this._db) return this._db;
+    this._db = await new Promise((res, rej) => { const rq = indexedDB.open("jordynai_images", 1); rq.onupgradeneeded = () => rq.result.createObjectStore("sheets"); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); });
+    return this._db;
+  },
+  async tx(mode, fn) { const db = await this.db(); return new Promise((res, rej) => { const t = db.transaction("sheets", mode); const rq = fn(t.objectStore("sheets")); t.oncomplete = () => res(rq ? rq.result : undefined); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error); }); },
+  async seal(blob) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    if (Vault.isOpen()) { const iv = rand(12); const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, Vault.dek, bytes); return { enc: true, iv, ct: new Uint8Array(ct) }; }
+    return { enc: false, data: bytes };
+  },
+  async unseal(rec) {
+    if (!rec) return null;
+    if (rec.enc) { if (!Vault.isOpen()) return null; const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: rec.iv }, Vault.dek, rec.ct); return new Blob([pt], { type: "image/jpeg" }); }
+    return new Blob([rec.data], { type: "image/jpeg" });
+  },
+  key: (m, code) => [m.gradeSection, m.term, m.slot, m.subject, code].join("|"),
+  async put(meta, code, sheet, name) { try { const rec = { sheet: await this.seal(sheet), name: name ? await this.seal(name) : null, meta: { ...meta, code }, at: Date.now() }; await this.tx("readwrite", st => st.put(rec, this.key(meta, code))); return true; } catch (e) { return false; } },
+  async get(k) { try { const rec = await this.tx("readonly", st => st.get(k)); if (!rec) return null; return { sheet: await this.unseal(rec.sheet), name: await this.unseal(rec.name), meta: rec.meta }; } catch (e) { return null; } },
+  async keys(prefix = "") { try { return (await this.tx("readonly", st => st.getAllKeys())).filter(k => String(k).startsWith(prefix)); } catch (e) { return []; } },
+  async wipe() { try { this._db && this._db.close(); this._db = null; await new Promise(r => { const rq = indexedDB.deleteDatabase("jordynai_images"); rq.onsuccess = rq.onerror = rq.onblocked = () => r(); }); } catch (e) {} },
+};
+const safeName = s => String(s).replace(/[\u2013\u2014]/g, "-").replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim();
+/* every saved image as { path, blob }: JordynAI Answer Sheets/<Grade – Section>/<Term> <Exam> <Subject>/<code>.jpg + <code>_name.jpg */
+async function allSheetFiles(prefix = "") {
+  const out = [];
+  for (const k of await imgStore.keys(prefix)) {
+    const it = await imgStore.get(k); if (!it || !it.sheet) continue;
+    const m = it.meta, dir = ["JordynAI Answer Sheets", safeName(m.gradeSection), safeName(`${m.term} ${m.slot} ${m.subject}`)];
+    out.push({ dir, file: `${safeName(m.code)}.jpg`, blob: it.sheet });
+    if (it.name) out.push({ dir, file: `${safeName(m.code)}_name.jpg`, blob: it.name });
+  }
+  return out;
+}
+async function sheetsZip(prefix) {
+  const files = await allSheetFiles(prefix); if (!files.length) return null;
+  const zip = new window.JSZip();
+  files.forEach(f => zip.file([...f.dir, f.file].join("/"), f.blob));
+  return zip.generateAsync({ type: "blob", compression: "STORE" });
+}
+async function sheetsToFolder(prefix) {
+  if (!window.showDirectoryPicker) throw new Error("unsupported");
+  const files = await allSheetFiles(prefix); if (!files.length) return 0;
+  const root = await window.showDirectoryPicker({ mode: "readwrite" });
+  for (const f of files) {
+    let d = root; for (const part of f.dir) d = await d.getDirectoryHandle(part, { create: true });
+    const fh = await d.getFileHandle(f.file, { create: true }), w = await fh.createWritable(); await w.write(f.blob); await w.close();
+  }
+  return files.length;
+}
 
 /* ===================== STORAGE (Claude db, else this browser) ===================== */
 const store = {
@@ -797,6 +868,9 @@ function LiveScanner({ n, onResult, onClose }) {
   const [count, setCount] = useState(0);
   const [flash, setFlashOn] = useState(false);
   const [box, setBox] = useState(frameSize());
+  const [torch, setTorch] = useState(false), [torchMsg, setTorchMsg] = useState("");
+  const torchRef = useRef(null);
+  const toggleTorch = async () => { const t = torchRef.current; if (!t) return; try { await t.applyConstraints({ advanced: [{ torch: !torch }] }); setTorch(!torch); } catch (e) {} };
   const state = useRef({ hist: [], lastCode: null, cooldownUntil: 0, needGone: false, gone: 0 });
 
   useEffect(() => {
@@ -808,7 +882,12 @@ function LiveScanner({ n, onResult, onClose }) {
         if (!alive) { s.getTracks().forEach(t => t.stop()); return; }
         streamRef.current = s; const v = videoRef.current; v.srcObject = s; await v.play();
         setStatus("Show ONE sheet inside the frame, with all 4 black corners visible.");
-        timer = setInterval(tick, 280);
+        timer = setInterval(tick, 150);
+        try {                                             // flashlight: Android Chrome supports it; iPhone browsers don't
+          const track = s.getVideoTracks()[0], caps = track.getCapabilities ? track.getCapabilities() : {};
+          if (caps.torch) { torchRef.current = track; await track.applyConstraints({ advanced: [{ torch: true }] }); setTorch(true); }
+          else setTorchMsg("Tip: this phone/browser can't control the flashlight. Scan in good light.");
+        } catch (e) { setTorchMsg("Tip: scan in good light."); }
       } catch (e) {
         setErr("The live camera isn't available here. It works on the website version of the app (opened in Chrome or Safari). In the Claude app, use 📸 Take photo instead.");
       }
@@ -825,7 +904,7 @@ function LiveScanner({ n, onResult, onClose }) {
     if (!res.ok) { if (manual) setStatus("Couldn't find the 4 black corners. Move closer and hold steady."); return false; }
     const st = state.current;
     if (!manual && res.code && res.code === st.lastCode) { st.needGone = true; return false; }   // same sheet still in view
-    st.lastCode = res.code; st.cooldownUntil = Date.now() + 1300; st.needGone = !res.code; st.gone = 0; st.hist = [];
+    st.lastCode = res.code; st.cooldownUntil = Date.now() + 900; st.needGone = !res.code; st.gone = 0; st.hist = [];
     try { navigator.vibrate && navigator.vibrate(70); } catch (e) {}
     setFlashOn(true); setTimeout(() => setFlashOn(false), 180);
     setCount(x => x + 1);
@@ -836,15 +915,15 @@ function LiveScanner({ n, onResult, onClose }) {
 
   const tick = () => {
     const v = videoRef.current, st = state.current; if (!v || !v.videoWidth) return;
-    const small = toGray(v, 480), cc = coarseCorners(small);
+    const small = toGray(v, 400), cc = coarseCorners(small);
     if (!cc) { st.hist = []; st.gone++; if (st.gone >= 2) { st.needGone = false; st.lastCode = null; } if (Date.now() > st.cooldownUntil) setStatus("Show ONE sheet inside the frame, with all 4 black corners visible."); return; }
     st.gone = 0;
     if (Date.now() < st.cooldownUntil || st.needGone) return;
     const p = cc.pts, w = small.W;
-    st.hist.push(p); if (st.hist.length > 3) st.hist.shift();
-    if (st.hist.length < 3) { setStatus("Corners found. Hold still…"); return; }
-    const moved = Math.max(...st.hist[0].map((q, i) => Math.hypot(q.x - st.hist[2][i].x, q.y - st.hist[2][i].y))) / w;
-    if (moved < 0.015) capture(false); else setStatus("Hold still…");
+    st.hist.push(p); if (st.hist.length > 2) st.hist.shift();
+    if (st.hist.length < 2) { setStatus("Corners found. Hold still…"); return; }
+    const moved = Math.max(...st.hist[0].map((q, i) => Math.hypot(q.x - st.hist[1][i].x, q.y - st.hist[1][i].y))) / w;
+    if (moved < 0.02) capture(false); else setStatus("Hold still…");
   };
 
   const g = box.w * (5 / 105), inset = box.w * (4 / 105);
@@ -854,7 +933,10 @@ function LiveScanner({ n, onResult, onClose }) {
       {flash && <div className="absolute inset-0 bg-white/70 pointer-events-none" />}
       <div className="relative z-10 flex items-center justify-between p-3 text-white text-sm bg-gradient-to-b from-black/70 to-transparent">
         <span>🎥 Live scan · <b>{count}</b> captured</span>
-        <button onClick={onClose} className="px-3 py-1.5 rounded-lg bg-white/15 font-bold">Done</button>
+        <span className="flex gap-2">
+          {torchRef.current && <button onClick={toggleTorch} className={`px-3 py-1.5 rounded-lg font-bold ${torch ? "bg-amber-400 text-slate-950" : "bg-white/15"}`}>⚡ {torch ? "On" : "Off"}</button>}
+          <button onClick={onClose} className="px-3 py-1.5 rounded-lg bg-white/15 font-bold">Done</button>
+        </span>
       </div>
       <div className="relative z-10 flex-1 flex items-center justify-center pointer-events-none">
         <div className="relative rounded-md ring-2 ring-cyan-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" style={{ width: box.w, height: box.h }}>
@@ -866,6 +948,7 @@ function LiveScanner({ n, onResult, onClose }) {
         {err ? <p className="text-amber-300 text-sm mb-3">{err}</p> : <p className="text-white text-sm mb-3">{status}</p>}
         {!err && <button onClick={() => capture(true)} className="w-16 h-16 rounded-full bg-white border-4 border-cyan-400 shadow-lg" aria-label="Capture now" />}
         <p className="text-[11px] text-slate-300 mt-2">It captures by itself when the sheet is steady. Put the next sheet in front and it continues.</p>
+        {torchMsg && <p className="text-[11px] text-amber-200 mt-1">{torchMsg}</p>}
       </div>
     </div>,
     document.body
@@ -873,7 +956,7 @@ function LiveScanner({ n, onResult, onClose }) {
 }
 
 /* ===================== SCANNER PANEL ===================== */
-function ScanPanel({ onStudent, onKey, n, hasKey }) {
+function ScanPanel({ onStudent, onKey, n, hasKey, meta }) {
   const [sample, setSample] = useState(undefined);
   const [imgOK, setImgOK] = useState(false);
   const [items, setItems] = useState([]);   // {id, thumb, status: done|review|align|error, code, answers, flagged, msg, cropBlob, blob}
@@ -893,24 +976,30 @@ function ScanPanel({ onStudent, onKey, n, hasKey }) {
   const claudeOK = !!sample && imgOK;
   const patch = (id, p) => setItems(list => list.map(it => (it.id === id ? { ...it, ...p } : it)));
 
+  const saveImages = (code, it) => { if (it.sheetBlob) imgStore.put(meta, code, it.sheetBlob, it.nameBlob); };
   const commit = (it, code, answers) => {
     const c = up(code).replace(/\s/g, "");
     if (c === "KEY") {
       if (answers.some(a => !a)) return "The answer key has blank items. Fill every item first.";
-      onKey(answers.slice()); return "";
+      onKey(answers.slice()); saveImages("KEY", it); return "";
     }
     const m = c.match(/^([BG])-?(\d{1,2})$/); if (!m) return "Type a code like B-12 or G-3.";
     const id = `${m[1]}-${+m[2]}`, responses = {};
     answers.forEach((a, i) => { responses[i + 1] = a || ""; });
-    onStudent({ student_id: id, student_name: "", responses }); return "";
+    onStudent({ student_id: id, student_name: "", responses }); saveImages(id, it); return "";
   };
 
   const handleResult = async (res, name, blob) => {
     const id = Math.random().toString(36).slice(2);
     if (!res.ok) { setItems(l => [{ id, status: "align", msg: "Couldn't find the 4 black corners.", blob, name }, ...l]); return; }
-    const crop = warpCrop(res, 5), thumb = crop.toDataURL("image/jpeg", 0.6), cropBlob = await canvasBlob(warpCrop(res, 8));
-    if (!res.layoutOk) { setItems(l => [{ id, status: "error", thumb, cropBlob, blob, name, code: res.code || "", answers: Array(n).fill(null), flagged: [], msg: `This sheet doesn't match ${n} items. Was it printed for a different number of items? Reprint, or use Ask Claude.` }, ...l]); return; }
-    const item = { id, thumb, cropBlob, blob, name, code: res.code || "", answers: res.answers.slice(), flagged: res.flagged.slice() };
+    const crop = warpCrop(res, 5), thumb = crop.toDataURL("image/jpeg", 0.6);
+    const sheetBlob = await canvasBlob(crop, 0.8);                                   // saved on the device as the learner's reference
+    const nameBlob = await canvasBlob(warpCrop(res, 12, ...NAME_STRIP), 0.85);     // the written name, also device-only
+    const cc = warpCrop(res, 8), cx = cc.getContext("2d"); cx.fillStyle = "#fff";    // copy for "Ask Claude": name blanked out
+    cx.fillRect(NAME_STRIP[0] * 8, NAME_STRIP[1] * 8, (NAME_STRIP[2] - NAME_STRIP[0]) * 8, 6 * 8);
+    const cropBlob = await canvasBlob(cc);
+    if (!res.layoutOk) { setItems(l => [{ id, status: "error", thumb, cropBlob, sheetBlob, nameBlob, blob, name, code: res.code || "", answers: Array(n).fill(null), flagged: [], msg: `This sheet doesn't match ${n} items. Was it printed for a different number of items? Reprint, or use Ask Claude.` }, ...l]); return; }
+    const item = { id, thumb, cropBlob, sheetBlob, nameBlob, blob, name, code: res.code || "", answers: res.answers.slice(), flagged: res.flagged.slice() };
     const keyBlanks = res.code === "KEY" && res.answers.some(a => !a);
     if (res.code && !res.flagged.length && !keyBlanks) {
       const e = commit(item, res.code, res.answers);
@@ -1255,7 +1344,7 @@ function Gate({ children }) {
       <details className="mt-4 text-xs text-slate-500">
         <summary className="cursor-pointer">Forgot everything?</summary>
         <p className="mt-2">Without your password, your recovery code or the admin, the data on this device can't be opened. You can erase it and start fresh.</p>
-        <button onClick={() => { if (window.__eraseArmed) { Vault.erase(); window.location.reload(); } else { window.__eraseArmed = true; setErr("Tap 'Erase this device' again to confirm. Everything on this device will be deleted."); } }} className="mt-2 px-3 py-1.5 rounded-lg bg-red-600/80 text-white font-bold">Erase this device</button>
+        <button onClick={async () => { if (window.__eraseArmed) { await imgStore.wipe(); Vault.erase(); window.location.reload(); } else { window.__eraseArmed = true; setErr("Tap 'Erase this device' again to confirm. Everything on this device will be deleted."); } }} className="mt-2 px-3 py-1.5 rounded-lg bg-red-600/80 text-white font-bold">Erase this device</button>
       </details>
     </GateShell>
   );
@@ -1505,6 +1594,23 @@ function App() {
   const slot = config.slot || (config.examType === "term" ? "TE" : "ST1");
   const term = config.term || termNow();
   const examLabel = SLOTS[slot];
+  const imgMeta = { gradeSection, term, slot, subject: subj.label };
+  const imgPrefix = [gradeSection, term, slot, subj.label].join("|") + "|";
+  const [imgKeys, setImgKeys] = useState([]);
+  const [viewImg, setViewImg] = useState(null);   // { code, sheetUrl, nameUrl }
+  const [exporting, setExporting] = useState("");
+  useEffect(() => { if (tab === "grades") imgStore.keys(imgPrefix).then(k => setImgKeys(k.map(x => x.split("|").pop()))); }, [tab, students.length, imgPrefix]);
+  const openImg = async code => { const it = await imgStore.get(imgPrefix + code); if (!it) return flash(Vault.exists() && !Vault.isOpen() ? "Unlock first." : "No saved sheet for " + code); setViewImg({ code, sheetUrl: it.sheet && URL.createObjectURL(it.sheet), nameUrl: it.name && URL.createObjectURL(it.name) }); };
+  const exportZip = async (prefix, label) => {
+    if (!window.JSZip) return flash("ZIP tool not loaded. Check your internet once, then try again.");
+    setExporting("zip"); try { const z = await sheetsZip(prefix); if (!z) flash("No saved sheet images yet."); else await saveFile(z, `JordynAI_Answer_Sheets_${label.replace(/[^\w]+/g, "_")}.zip`, "application/zip"); } catch (e) { flash("Couldn't make the ZIP."); } setExporting("");
+  };
+  const exportFolder = async prefix => {
+    setExporting("folder");
+    try { const nFiles = await sheetsToFolder(prefix); flash(nFiles ? `${nFiles} files saved into folders.` : "No saved sheet images yet."); }
+    catch (e) { flash(e.message === "unsupported" ? "Folder saving works in Chrome or Edge on a laptop. Use the ZIP on phones." : e.name === "AbortError" ? "Cancelled." : "Couldn't save to that folder (this view may block it). Use the ZIP."); }
+    setExporting("");
+  };
   const rule = itemRule(grade);
   const itemWarn = rule ? (slot === "TE" ? (n !== rule.te ? `DO 15, s. 2026: the Term Exam for ${rule.ks} has ${rule.te} items (you set ${n}).` : "") : (n > rule.st ? `DO 15, s. 2026: a Summative Test for ${rule.ks} has at most ${rule.st} items (you set ${n}).` : "")) : "";
 
@@ -1622,6 +1728,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
     const keys = ["profile", "config", "key", "keySaved", "classes", "history", "passMark", "passMarkV2", ...classes.map(rosterKey)];
     let ok = true;
     for (const k of keys) { if (!(await store.set(k, null))) ok = false; }
+    await imgStore.wipe();
     if (!store.db) { Vault.erase(); window.location.reload(); return; }   // website: back to "create password"
     try { Object.keys(localStorage).filter(k => k.startsWith("jordynai_")).forEach(k => localStorage.removeItem(k)); } catch (e) {}
     setProfile(DEFAULT_PROFILE); setConfig(DEFAULT_CONFIG); setKey(Array(50).fill("A")); setKeySaved(false);
@@ -1655,10 +1762,10 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
           <thead className="bg-white/5 text-slate-300"><tr>
             <th className="p-2 text-left">ID</th><th className="p-2 text-left">Initials</th>
             {key.map((_, i) => <th key={i} className="p-1 text-center w-7 font-mono text-xs">{i + 1}</th>)}
-            <th className="p-2">Score</th><th className="p-2">%</th><th className="p-2">Status</th><th className="p-2 text-left">Level</th>
+            <th className="p-2">Score</th><th className="p-2">%</th><th className="p-2">Status</th><th className="p-2 text-left">Level</th><th className="p-2">Sheet</th>
           </tr></thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={key.length + 6} className="p-3 text-center text-slate-500">No learners</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={key.length + 7} className="p-3 text-center text-slate-500">No learners</td></tr>}
             {rows.map(s => (
               <tr key={s.id} className="border-t border-white/5">
                 <td className="p-2 font-mono font-bold text-cyan-200">{s.id}</td><td className="p-2">{s.name}</td>
@@ -1666,6 +1773,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
                 <td className="p-2 text-center font-bold">{s.score}/{n}</td><td className="p-2 text-center">{fmt(s.pct)}</td>
                 <td className="p-2 text-center"><span className={`text-xs font-bold px-2 py-0.5 rounded ${s.pass ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"}`}>{s.pass ? "PASSED" : "FAILED"}</span></td>
                 <td className="p-2"><Badge pct={s.pct} /></td>
+                <td className="p-2 text-center">{imgKeys.includes(s.id) ? <button onClick={() => openImg(s.id)} className="text-lg" title="View scanned sheet">🖼️</button> : <span className="text-slate-600">–</span>}</td>
               </tr>))}
           </tbody>
         </table>
@@ -1814,11 +1922,19 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
         </>}
 
         {tab === "scan" && unlocked && <>
-          <ScanPanel onStudent={addScanned} onKey={onScannedKey} n={n} hasKey={keySaved} />
+          <ScanPanel onStudent={addScanned} onKey={onScannedKey} n={n} hasKey={keySaved} meta={imgMeta} />
           <Card><p className="text-sm text-slate-300">{students.length} learner(s) in <b>{gradeSection}</b>. {students.length > 0 && <button onClick={() => setTab("grades")} className="text-cyan-300 underline">See Gradesheet →</button>}</p></Card>
         </>}
 
         {tab === "grades" && unlocked && <div>
+          <Card className="mb-4 !p-3"><div className="flex flex-wrap items-center gap-2 justify-between">
+            <span className="text-xs text-slate-300">🗂️ Scanned sheets saved for this exam: <b>{imgKeys.filter(k => k !== "KEY").length}</b> (with the learner's written name). Saved on this device only.</span>
+            <span className="flex flex-wrap gap-2">
+              <button disabled={!!exporting} onClick={() => exportZip(imgPrefix, `${gradeSection}_${slot}_${term}`)} className="px-3 py-1.5 text-xs rounded-lg bg-emerald-500 text-slate-950 font-bold disabled:opacity-40">{exporting === "zip" ? "Zipping…" : "⬇ ZIP this exam"}</button>
+              <button disabled={!!exporting} onClick={() => exportZip("", "all")} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 disabled:opacity-40">⬇ ZIP everything</button>
+              {"showDirectoryPicker" in window && <button disabled={!!exporting} onClick={() => exportFolder("")} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 disabled:opacity-40">💾 Save into a folder (laptop)</button>}
+            </span>
+          </div></Card>
           <GradeTable title="BOYS" rows={data.boys} stats={data.bStats} tone="bg-blue-700/80" />
           <GradeTable title="GIRLS" rows={data.girls} stats={data.gStats} tone="bg-pink-600/80" />
           {data.missing.length > 0 && <p className="text-sm text-sky-200 bg-sky-500/10 p-3 rounded-lg mb-2">📝 Enrolled but no sheet yet ({data.missing.length}): {data.missing.map(id => `${id} ${toInitials(rosterName(id))}`).join(", ")}</p>}
@@ -1975,6 +2091,12 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
         <p className="text-sm text-slate-300 mb-4">{gradeSection} · {subj.label} · {examLabel} · {data.total} learners · MPS {fmt(data.mps)}%. It will be saved to History with its summary and CSV.</p>
         <div className="flex gap-2"><button onClick={finalize} className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white font-bold">✔ Finalize</button>
           <button onClick={() => setModal(null)} className="flex-1 py-2.5 rounded-xl bg-white/10">Cancel</button></div>
+      </Modal>}
+      {viewImg && <Modal wide onClose={() => { [viewImg.sheetUrl, viewImg.nameUrl].forEach(u => u && URL.revokeObjectURL(u)); setViewImg(null); }}>
+        <div className="flex items-center justify-between mb-2"><h3 className="font-black text-white">🖼️ {viewImg.code} · {rosterName(viewImg.code) ? toInitials(rosterName(viewImg.code)) : ""} · {examLabel}</h3>
+          <button onClick={() => { [viewImg.sheetUrl, viewImg.nameUrl].forEach(u => u && URL.revokeObjectURL(u)); setViewImg(null); }} className="text-slate-400 text-xl">✕</button></div>
+        {viewImg.nameUrl && <><p className="text-xs text-slate-400 mb-1">Written name:</p><img src={viewImg.nameUrl} alt="name" className="w-full max-w-lg bg-white rounded mb-3" /></>}
+        {viewImg.sheetUrl && <img src={viewImg.sheetUrl} alt="sheet" className="w-full max-w-md mx-auto bg-white rounded" />}
       </Modal>}
       {modal === "resetAll" && <Modal>
         <div className="text-center">

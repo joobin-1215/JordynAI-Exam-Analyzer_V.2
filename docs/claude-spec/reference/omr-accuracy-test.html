@@ -11,6 +11,10 @@ function makeSheet(n, code, answers, opts, R) {
   const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
   const o = { profile: { region: "REGION XI", division: "SCHOOLS DIVISION OF DAVAO CITY", school: "LEON GARCIA SR. NATIONAL HIGH SCHOOL" }, n, gradeSection: "Grade 7 – LILY", subject: "Music and Arts", exam: "ST1 · Term 2" };
   drawSheetCell(canvasPen(ctx, k), o, { code }, 0, 0);
+  // NAMEWRITE: handwritten name on the Name line (cursive-ish strokes)
+  ctx.strokeStyle = '#223'; ctx.lineWidth = 0.45 * k; ctx.beginPath();
+  for (let x = 14; x < 70; x += 1.2) { const y = 21.2 + Math.sin(x * 1.7) * 1.4 + (R() - 0.5) * 0.8; if (x === 14) ctx.moveTo(x * k, y * k); else ctx.lineTo(x * k, y * k); }
+  ctx.stroke();
   const { L, centers } = bubbleCenters(n);
   answers.forEach((a, qi) => {
     const marks = a === "DOUBLE" ? [0, 2] : a === "ERASED" ? [] : a ? ["ABCD".indexOf(a)] : [];

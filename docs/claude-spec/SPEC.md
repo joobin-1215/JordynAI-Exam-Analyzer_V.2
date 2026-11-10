@@ -1,7 +1,7 @@
 # JordynAI Exam Analyzer: Claude Design Spec (source of truth)
 
 Owner: **Joven R. Castro**, Teacher II (MAPEH), Leon Garcia Sr. National High School, Schools Division of Davao City, Region XI.
-Spec version: **1.3 · Nov 10, 2026** (password lock + encrypted device data) (aligned with DepEd Order No. 15, s. 2026, as reported; verify against the official text). This file overrides older plans and existing code (see `/AGENTS.md`).
+Spec version: **1.4 · Nov 10, 2026** (faster scanner, name line, saved sheet images) (aligned with DepEd Order No. 15, s. 2026, as reported; verify against the official text). This file overrides older plans and existing code (see `/AGENTS.md`).
 
 Two builds follow this spec:
 - **Android app** (this repo: Kotlin, Jetpack Compose, Firebase), built by Google AI Studio.
@@ -143,6 +143,11 @@ Grade (Kinder, Grade 1–12) plus Section (uppercase). Saved classes appear as q
 - Bubble letters are printed light gray (#b4b4b4), so they're never mistaken for shading.
 - Named sheet download = KEY sheet first, then the boys, then the girls; buttons "Answer Sheets (PDF)" and "Word (.docx)". No names printed.
 
+## 7.2 Name line + lighter stripes (owner decision, Nov 10; replaces "no names on sheets")
+- Named and blank sheets have a **blank Name line for the learner to write** "Last, First". Directions: "Write your NAME (Last, First) on the Name line." The code still identifies the learner; the name is a reference only.
+- Row stripes are very light (#f6f7fb) so they never print dark.
+- Paper-brightness probes sit in the margins only (x 3 mm and 101.5 mm), so handwriting can't affect them.
+
 ## 8. Scanner
 - Portrait viewfinder in a 1 : 1.414 frame with corner guides and the label "One quarter-sheet, portrait, 4 corners in view". One sheet per photo.
 - **Primary reader = FREE ON-DEVICE OMR (owner decision, Nov 10). No AI, no cost, offline, photos never leave the device.** Steps (`readSheet` in the reference):
@@ -153,6 +158,9 @@ Grade (Kinder, Grade 1–12) plus Section (uppercase). Saved classes appear as q
   5. CODE dots → code. **Layout check:** printed bubble outlines must be found where expected (ring score > 0.35); otherwise "this sheet doesn't match n items".
   6. Result: code + no flags → saved automatically (KEY → answer key). Otherwise a **review card**: type the code, tap A/B/C/D/– for each flagged item, Save. **"Ask Claude"** (only inside Claude, uses the teacher's Claude usage) is a backup for unclear sheets; Claude only fills flagged or unreadable items, and the teacher still taps Save.
   - **Tested** (`reference/omr-accuracy-test.html`): 40 simulated pencil-shaded sheets (tilt to 12°, perspective, blur, noise, dark room, low resolution, light pencil): **0 wrong answers, 0 wrong codes**; doubles and erasures were always flagged. End-to-end: PDF → shaded → photographed → scanned = exact scores. Real paper is still to be confirmed with the teacher's own test sheets.
+- **Speed (owner decision, Nov 10):** corner search tries 4 darkness levels (works in bright and dim rooms), live check every **150 ms** on a 400 px frame (≈ 4 ms), captures when **2** consecutive checks are steady (< 2% movement), reads in ≈ 40 ms, and is ready for the next sheet after 0.9 s. Photo path: ≈ 0.25 s per sheet. Answer rule adds **average darkness ≥ 0.40**, so erased smudges are flagged, never read as answers. Tested: 30 + 24 + 16 simulated sheets (incl. very dim, handwritten names): **0 wrong answers, 0 wrong codes**.
+- **Flashlight:** the live camera turns the torch on automatically where supported (Android Chrome), with a ⚡ toggle; iPhone browsers can't control it, so a "scan in good light" tip is shown.
+- **Saved sheet images (owner decision, Nov 10):** each saved learner (and the KEY) stores a straightened sheet image (525 × 742 px JPEG) and the **name strip** (Name + Grade & Section lines, x 5–78 mm, y 18.6–29.6 mm) in IndexedDB `jordynai_images` on the device, **encrypted with the vault key** on the website. Key = Grade & Section | Term | Exam | Subject | Code. Gradesheet: a 🖼️ button per learner opens the name strip + sheet. **Export:** "ZIP this exam", "ZIP everything" (folders `JordynAI Answer Sheets/<Grade - Section>/<Term> <Exam> <Subject>/<code>.jpg` + `<code>_name.jpg`), and "Save into a folder (laptop)" via the File System Access API in Chrome/Edge. Images never go to AI: the copy used by "Ask Claude" has the name line blanked out. RESET ALL DATA and "Erase this device" also delete the images.
 - **Live camera (website version):** `getUserMedia` (rear camera), full screen, sheet-shaped frame with guides. Corner check every 280 ms; when the 4 corners are steady for 3 checks (< 1.5% movement) it **captures by itself** (vibrate + flash), reads the sheet, and waits for the next sheet (the same code isn't captured twice). Manual shutter too. Inside a Claude artifact the camera is blocked, so the button explains to use Take photo.
 - **Scan frame = answer sheet shape (owner decision, Nov 10).** The frame is exactly 1 : 1.414 (105 × 148.5 mm) and sized to the device: width = min(92% of screen width, 560 px, 66% of screen height ÷ 1.414). Measured: phone 390 × 844 → 359 × 507 px; tablet 820 × 1180 → 551 × 779 px. Four white guide squares sit where the sheet's black corners are (4 mm inset, 5 mm size, scaled to the frame).
 - **Auto-align:** detect the 4 black corner squares (dark blobs, roughly square, in the 4 extremes; corner-to-corner ratio 1.25–1.75) and fit move + turn + zoom so they land on the guides. If not found, the teacher aligns by hand: drag to move, pinch or scroll to zoom, ⟳ rotate 90°, Reset, Auto. "Use this sheet" crops to **1050 × 1485 px** (10 px per mm) and only that crop goes to the AI; "Use whole photo" skips cropping. Chosen photos can be aligned one by one (on by default) and re-aligned from their thumbnails.

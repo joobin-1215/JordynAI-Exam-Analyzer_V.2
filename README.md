@@ -8,7 +8,8 @@ A free DepEd exam checker for public high school teachers in the Philippines. It
 - **Teacher profile:** region, schools division and school, printed on every answer sheet.
 - **Class lists:** paste learners from the class record (Boys B-1…B-50, Girls G-1…G-50), with an A–Z check by last name.
 - **Answer sheets:** 4 per A4 portrait, as PDF or Word. Named sheets with a CODE and a dot code; blank extra sheets for late enrollees.
-- **Free scanner:** a live camera that captures by itself, or photos. Sheets are read **on the device**: no AI, no cost, works offline, photos never leave the phone.
+- **Free, fast scanner:** a live camera that captures by itself (about 1 second per sheet, auto flashlight on Android), or photos. Sheets are read **on the device**: no AI, no cost, works offline, photos never leave the phone.
+- **Saved sheet images:** each learner's scanned sheet and written name are saved (encrypted) per Grade & Section and exam; view them in the Gradesheet, or download a ZIP with folders (laptop: save straight into a folder).
 - **Reports:** Gradesheet (Boys / Girls), Item Analysis (Frequency of Errors, Critical items above 50%), SMEA summary, MAPEH per-component MPS, CSV export.
 - **DepEd Order No. 15, s. 2026:** pass mark 70%, ST1 / ST2 / TE per term, Exams Component (raw points and 30/30/40 weights), item-count warnings.
 - **Privacy:** learner names are saved only on the teacher's device. Sheets and saved results carry codes only.

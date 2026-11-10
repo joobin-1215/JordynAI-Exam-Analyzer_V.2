@@ -6,7 +6,7 @@ const GEO = {
   itemsTop: 46.2, itemsLeft: 6, colGap: 1.6,
   codeBox: { x: 79, y: 19.5, w: 20, h: 18.5 },
   dots: { x0: 80.2, y: 33.4, size: 1.6, step: 2.0, count: 9 },                 // CODE dot strip inside the box
-  paperProbe: [[20, 138.6], [35, 138.6], [50, 138.6], [65, 138.6], [80, 138.6], [52.5, 41.9], [30, 20.5], [70, 20.5]],
+  paperProbe: [[20, 138.6], [35, 138.6], [50, 138.6], [65, 138.6], [80, 138.6], [3, 60], [3, 100], [101.5, 60], [101.5, 100]],   // margins only: never under handwriting
 };
 /* Dot code, 9 cells: [start=1, isGirl, isKey, n5 n4 n3 n2 n1 n0] -> B-1..B-63, G-1..G-63, KEY */
 function codeToBits(code) {
@@ -52,7 +52,7 @@ function drawSheetCell(pen, o, learner, ox, oy) {
     pen.line(lx, Y(y + 0.6), X(x2), Y(y + 0.6), 0.15, "#000");
     if (printed) pen.text(printed, lx + 0.8, Y(y - 0.2), 6, { bold: true });
   };
-  field("Name:", 6, 23, 76, isKey ? "TEACHER'S ANSWER KEY" : "");
+  field("Name:", 6, 23, 76, isKey ? "TEACHER'S ANSWER KEY" : "");   // learners write their name here (saved on the device only)
   field("Grade & Section:", 6, 27.6, 76, blank ? "" : (o.gradeSection || ""));
   field("Subject:", 6, 32.2, 52, o.subject || ""); field("Date:", 54, 32.2, 76, "");
   field("Exam:", 6, 36.8, 52, o.exam || ""); field("Score:", 54, 36.8, 70, "");
@@ -67,7 +67,7 @@ function drawSheetCell(pen, o, learner, ox, oy) {
     if (bits) bits.forEach((bit, i) => pen.rect(X(D.x0 + i * D.step), Y(D.y), D.size, D.size, bit ? { fill: "#000" } : { stroke: "#000", lw: 0.15 }));
   }
   pen.text("Shade the circle of your answer FULLY and darkly. Use a pencil or black pen. One answer per number.", X(52.5), Y(41.3), 4.8, { align: "center" });
-  pen.text(blank ? "No check or X marks. Write your CODE in the box (ask your teacher)." : "No check or X marks. Do not write your name; your CODE identifies you.", X(52.5), Y(43.4), 4.8, { align: "center" });
+  pen.text(blank ? "No check or X marks. Write your NAME and your CODE (ask your teacher)." : "No check or X marks. Write your NAME (Last, First) on the Name line.", X(52.5), Y(43.4), 4.8, { align: "center" });
   const fs = Math.max(4.6, Math.min(9, L.b * 1.45)), nf = Math.max(5.4, Math.min(10, L.b * 1.7));
   for (let c = 0; c < L.cols; c++) {
     const start = c * L.rows + 1; if (start > o.n) break;
@@ -75,7 +75,7 @@ function drawSheetCell(pen, o, learner, ox, oy) {
     ["A", "B", "C", "D"].forEach((l, k) => pen.text(l, X(cx + noW + L.b / 2 + k * (L.b + L.gap)), Y(GEO.itemsTop + 2.4), Math.max(5, fs), { align: "center", bold: true }));
     for (let q = start; q <= Math.min(start + L.rows - 1, o.n); q++) {
       const r = q - start, ry = GEO.itemsTop + 3.4 + r * L.rowH;
-      if (r % 2 === 0) pen.rect(X(cx), Y(ry), L.colW, L.rowH, { fill: "#eef0f8" });
+      if (r % 2 === 0) pen.rect(X(cx), Y(ry), L.colW, L.rowH, { fill: "#f6f7fb" });   // very light: prints as pale gray, never dark
       const cy = ry + L.rowH / 2;
       pen.text(String(q), X(cx + noW - 0.8), Y(cy + nf * 0.12), nf, { align: "right", bold: true });
       centers[q - 1].forEach(([bx], k) => {
@@ -84,7 +84,7 @@ function drawSheetCell(pen, o, learner, ox, oy) {
       });
     }
   }
-  pen.text(blank ? "Extra / late-enrollee answer sheet · Do not fold. Keep the four black corners clean." : (isKey ? "TEACHER'S ANSWER KEY · scan this first" : "Do not fold. Keep the four black corners and the CODE dots clean."), X(52.5), Y(144), 4.3, { align: "center", color: "#777777" });
+  pen.text(blank ? "Extra / late-enrollee answer sheet · Do not fold. Keep the four black corners clean." : (isKey ? "TEACHER'S ANSWER KEY · scan this first" : "Write your name clearly. Do not fold. Keep the black corners and CODE dots clean."), X(52.5), Y(144), 4.3, { align: "center", color: "#777777" });
 }
 function drawPage(pen, o, cells) {
   pen.dash(true); pen.line(105, 0, 105, 297, 0.3, "#888888"); pen.line(0, 148.5, 210, 148.5, 0.3, "#888888"); pen.dash(false);
@@ -147,3 +147,4 @@ async function sheetsDocx(o, learners) {
   return D.Packer.toBlob(doc);
 }
 const blankList = pages => Array.from({ length: pages * 4 }, () => ({ code: "", name: "" }));
+
