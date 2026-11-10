@@ -71,5 +71,9 @@ CameraX live preview with the 1 : 1.414 frame and 4 guide squares, corner detect
 Port `GEO`, `drawSheetCell`, `codeToBits`/`bitsToCode`, `bubbleCenters`, `coarseCorners`/`refineCorners`/`homography`/`readSheet` to Kotlin (pure functions, unit-tested), and draw sheets with Android PdfDocument using the same geometry. Use Gemini only as an optional backup **after the owner approves the cost**.
 **Checks:** port `reference/omr-accuracy-test.html` cases into JVM tests with generated bitmaps: 0 wrong answers and 0 wrong codes; a 50-item sheet read as 25 is rejected; CameraX auto-capture when the corners are steady.
 
+## T15. Password lock + encrypted device data (SPEC 2.6)
+Per-device password, 12-word recovery code, admin public-key lock (admin-key.json), lock screen with Password / Recovery / Admin tabs, 15-minute auto-lock, Security card, Erase this device. Android: store the vault in app-private storage; use Android Keystore for an optional biometric unlock **only after the owner approves**.
+**Checks:** nothing readable (school, names, classes) in storage; wrong password and wrong master password refused; admin unlock works on a co-teacher device; recovery code works in any letter case; the admin-key.json contains no password.
+
 ---
 When all tasks are done, tell the owner, and ask Claude to update `SPEC.md` / `DECISIONS.md` if anything had to differ.

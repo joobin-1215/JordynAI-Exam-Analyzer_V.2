@@ -3,6 +3,7 @@
 Decisions by Joven R. Castro, recorded by Claude. Each one overrides any older plan or code.
 
 ## 2026-11-10
+- **Password lock:** me + co-teachers, each with a password on their own device; device data encrypted; 12-word recovery code; admin master password via an admin key file; auto-lock after 15 minutes.
 - **100% free reading:** sheets are read ON THE DEVICE by our own bubble reader (exact sheet geometry + perspective correction + darkness check), with a tiny CODE dot strip for learner codes. No Gemini or paid API. Claude is only an optional backup for unclear sheets (inside Claude).
 - **Free public website** (GitHub Pages) so the live camera works; only the app is public, never learner data.
 - **Copy A/S = blank extra sheets** (late enrollees, spoiled sheets): profile header printed; Name, Grade & Section, Date and CODE blank; download as **PDF** or **Microsoft Word (.docx)** only.

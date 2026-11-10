@@ -12,6 +12,7 @@ A free DepEd exam checker for public high school teachers in the Philippines. It
 - **Reports:** Gradesheet (Boys / Girls), Item Analysis (Frequency of Errors, Critical items above 50%), SMEA summary, MAPEH per-component MPS, CSV export.
 - **DepEd Order No. 15, s. 2026:** pass mark 70%, ST1 / ST2 / TE per term, Exams Component (raw points and 30/30/40 weights), item-count warnings.
 - **Privacy:** learner names are saved only on the teacher's device. Sheets and saved results carry codes only.
+- **Password lock:** each teacher sets a password; everything on the device is encrypted. 12-word recovery code; the admin master password (via `admin-key.json`) can open any teacher's device. Auto-lock after 15 minutes.
 
 ## Folders
 | Path | What |

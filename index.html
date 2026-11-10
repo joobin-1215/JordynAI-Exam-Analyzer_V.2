@@ -65,8 +65,8 @@ function itemRule(grade) {
 }
 /* Learner names never go to Claude: they are kept only in this browser. */
 const localStore = {
-  get(k, fb) { try { const v = JSON.parse(localStorage.getItem("jordynai_" + k) || "null"); return v == null ? fb : v; } catch (e) { return fb; } },
-  set(k, v) { try { if (v == null) localStorage.removeItem("jordynai_" + k); else localStorage.setItem("jordynai_" + k, JSON.stringify(v)); return true; } catch (e) { return false; } },
+  get(k, fb) { if (Vault.isOpen()) return Vault.get("jordynai_" + k, fb); try { const v = JSON.parse(localStorage.getItem("jordynai_" + k) || "null"); return v == null ? fb : v; } catch (e) { return fb; } },
+  set(k, v) { if (Vault.isOpen()) return Vault.set("jordynai_" + k, v); try { if (v == null) localStorage.removeItem("jordynai_" + k); else localStorage.setItem("jordynai_" + k, JSON.stringify(v)); return true; } catch (e) { return false; } },
 };
 const COMP_STYLE = ["bg-violet-500", "bg-pink-500", "bg-emerald-500", "bg-sky-500"];
 /* Default component blocks: earlier components get the smaller share (12 + 13, or 12 + 13 + 12 + 13 for 50). */
@@ -447,10 +447,107 @@ function warpCrop(res, ppm = 5) {
 const canvasBlob = (c, q = 0.85) => new Promise(r => c.toBlob(r, "image/jpeg", q));
 const loadImage = blob => new Promise((res, rej) => { const u = URL.createObjectURL(blob), im = new Image(); im.onload = () => { res(im); setTimeout(() => URL.revokeObjectURL(u), 1000); }; im.onerror = rej; im.src = u; });
 
+/* ===================== SECURITY: password lock + encrypted device data ===================== */
+/* Data on this device is encrypted with a random key (DEK). The DEK is locked ("wrapped") three ways:
+   1) the teacher's password, 2) a 12-word recovery code, 3) the admin's public key (only the admin master password opens it).
+   Nothing secret is stored in plain text, and the master password is never stored anywhere. */
+const VAULT_KEY = "jordynai_vault";
+const PBKDF2_ITER = 310000;
+const enc = new TextEncoder(), dec = new TextDecoder();
+const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const rand = n => crypto.getRandomValues(new Uint8Array(n));
+const RECOVERY_WORDS = ("acid aloe amber anchor apple arch arrow atlas badge bagel bamboo banana basil beach beacon berry bison blade blaze bloom bolt bonus brave bread brick bridge brook brush cabin cable cactus camel candle canoe canyon carbon cargo carrot castle cedar chalk cherry chess chili cider cinema circle citrus clay cliff cloud clover cobra cocoa comet coral cotton crane crater crisp crown crystal cube daisy delta denim desert diamond dingo dolphin domino donut dragon drum dune eagle echo eclipse elbow ember emerald engine falcon feather fern ferry fiber fig flame flute forest fossil fox frost galaxy garden garlic gecko ginger glacier globe goose grape gravel guava guitar hammer harbor hazel helmet hero hippo honey hornet humble igloo indigo iris island ivory jacket jade jaguar jasmine jelly jewel jungle kayak kettle kiwi koala ladder lagoon lantern laser lava lemon lily lime lizard llama lobster lotus magnet mango maple marble meadow melon meteor mint mirror mocha moon mosaic moss mountain muffin nectar needle nest noodle nova oasis ocean olive onion opal orbit orchid otter owl oyster paddle palm panda papaya parrot pastel peach peanut pearl pebble pepper piano pickle pilot pine pixel planet plum polar pony poppy prism pumpkin puzzle quartz quill rabbit radar rain raven reef rhino ribbon river robin rocket rose ruby saddle saffron salmon sand satin scarf shell shrimp silver sky sloth snow solar spark spice spider sponge spruce squid star stone storm sugar summit sunset swan tango thunder tiger timber tomato topaz torch tulip tundra turtle umbrella valley vanilla velvet violet walnut wave whale willow wind wolf yacht yarn zebra zinc").split(" ");
+
+async function kekFromSecret(secret, salt) {
+  const base = await crypto.subtle.importKey("raw", enc.encode(secret), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: PBKDF2_ITER, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+async function aesEnc(key, bytes) { const iv = rand(12); const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, bytes); return { iv: b64(iv), ct: b64(ct) }; }
+async function aesDec(key, box) { return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(box.iv) }, key, unb64(box.ct))); }
+async function wrapWithSecret(rawDek, secret) { const salt = rand(16); const kek = await kekFromSecret(secret, salt); return { salt: b64(salt), ...(await aesEnc(kek, rawDek)) }; }
+async function unwrapWithSecret(w, secret) { const kek = await kekFromSecret(secret, unb64(w.salt)); return aesDec(kek, w); }
+/* admin: ECDH P-256 */
+async function wrapForAdmin(rawDek, adminKey) {
+  const pub = await crypto.subtle.importKey("jwk", adminKey.pub, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const eph = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey"]);
+  const k = await crypto.subtle.deriveKey({ name: "ECDH", public: pub }, eph.privateKey, { name: "AES-GCM", length: 256 }, false, ["encrypt"]);
+  return { eph: await crypto.subtle.exportKey("jwk", eph.publicKey), kid: adminKey.kid, ...(await aesEnc(k, rawDek)) };
+}
+async function unwrapForAdmin(w, adminKey, master) {
+  const pkcs8 = await unwrapWithSecret(adminKey.privEnc, master);             // wrong master password -> throws
+  const priv = await crypto.subtle.importKey("pkcs8", pkcs8, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]);
+  const eph = await crypto.subtle.importKey("jwk", w.eph, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const k = await crypto.subtle.deriveKey({ name: "ECDH", public: eph }, priv, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  return aesDec(k, w);
+}
+async function createAdminKey(master) {
+  const kp = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey"]);
+  const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", kp.privateKey));
+  return { type: "jordynai-admin-key", version: 1, kid: b64(rand(6)), created: new Date().toISOString(), pub: await crypto.subtle.exportKey("jwk", kp.publicKey), privEnc: await wrapWithSecret(pkcs8, master) };
+}
+const newRecoveryCode = () => Array.from(rand(12), b => RECOVERY_WORDS[b]).join(" ");
+const normCode = s => String(s || "").toLowerCase().trim().split(/\s+/).join(" ");
+
+const Vault = {
+  map: null, dek: null, rawDek: null, wraps: null, saveTimer: null, adminKey: null, unlockedBy: "",
+  exists() { try { return !!localStorage.getItem(VAULT_KEY); } catch (e) { return false; } },
+  isOpen() { return !!this.map; },
+  async loadAdminKey() {
+    if (this.adminKey !== null) return this.adminKey;
+    try { const r = await fetch("admin-key.json", { cache: "no-store" }); const j = r.ok ? await r.json() : null; this.adminKey = j && j.type === "jordynai-admin-key" ? j : false; }
+    catch (e) { this.adminKey = false; }
+    return this.adminKey;
+  },
+  async open(rawDek, wraps, by) {
+    this.rawDek = rawDek; this.wraps = wraps; this.unlockedBy = by;
+    this.dek = await crypto.subtle.importKey("raw", rawDek, "AES-GCM", false, ["encrypt", "decrypt"]);
+    const v = JSON.parse(localStorage.getItem(VAULT_KEY));
+    this.map = v.data ? JSON.parse(dec.decode(await aesDec(this.dek, v.data))) : {};
+    const ak = await this.loadAdminKey();                                       // add the admin lock if it's missing or outdated
+    if (ak && (!wraps.admin || wraps.admin.kid !== ak.kid)) { this.wraps.admin = await wrapForAdmin(rawDek, ak); await this.save(); }
+  },
+  async create(password) {
+    const rawDek = rand(32), code = newRecoveryCode();
+    const wraps = { pw: await wrapWithSecret(rawDek, password), rc: await wrapWithSecret(rawDek, normCode(code)) };
+    const ak = await this.loadAdminKey(); if (ak) wraps.admin = await wrapForAdmin(rawDek, ak);
+    // move any existing plain data into the vault
+    const map = {}; Object.keys(localStorage).filter(k => k.startsWith("jordynai_") && k !== VAULT_KEY).forEach(k => { try { map[k] = JSON.parse(localStorage.getItem(k)); } catch (e) {} });
+    localStorage.setItem(VAULT_KEY, JSON.stringify({ v: 1, wraps, data: null }));
+    this.rawDek = rawDek; this.wraps = wraps; this.unlockedBy = "password";
+    this.dek = await crypto.subtle.importKey("raw", rawDek, "AES-GCM", false, ["encrypt", "decrypt"]);
+    this.map = map; await this.save();
+    Object.keys(map).forEach(k => localStorage.removeItem(k));
+    return code;
+  },
+  async unlock(kind, secret) {
+    const v = JSON.parse(localStorage.getItem(VAULT_KEY)), w = v.wraps;
+    let raw;
+    if (kind === "password") raw = await unwrapWithSecret(w.pw, secret);
+    else if (kind === "recovery") raw = await unwrapWithSecret(w.rc, normCode(secret));
+    else { const ak = await this.loadAdminKey(); if (!ak || !w.admin) throw new Error("no-admin"); raw = await unwrapForAdmin(w.admin, ak, secret); }
+    await this.open(raw, w, kind);
+  },
+  async setPassword(newPw) { this.wraps.pw = await wrapWithSecret(this.rawDek, newPw); await this.save(); },
+  async newRecovery() { const code = newRecoveryCode(); this.wraps.rc = await wrapWithSecret(this.rawDek, normCode(code)); await this.save(); return code; },
+  async save() {
+    const map = this.map, dek = this.dek, wraps = this.wraps;   // captured now: lock() may clear them while this runs
+    if (!map || !dek) return;
+    const data = await aesEnc(dek, enc.encode(JSON.stringify(map)));
+    localStorage.setItem(VAULT_KEY, JSON.stringify({ v: 1, wraps, data }));
+  },
+  get(k, fb) { const v = this.map ? this.map[k] : undefined; return v == null ? fb : JSON.parse(JSON.stringify(v)); },
+  set(k, v) { if (!this.map) return false; if (v == null) delete this.map[k]; else this.map[k] = v; clearTimeout(this.saveTimer); this.saveTimer = setTimeout(() => this.save(), 250); return true; },
+  async flush() { clearTimeout(this.saveTimer); await this.save(); },
+  lock() { clearTimeout(this.saveTimer); this.save(); this.map = null; this.dek = null; this.rawDek = null; this.wraps = null; this.unlockedBy = ""; },
+  erase() { this.lock(); try { Object.keys(localStorage).filter(k => k.startsWith("jordynai_")).forEach(k => localStorage.removeItem(k)); } catch (e) {} },
+};
+
 /* ===================== STORAGE (Claude db, else this browser) ===================== */
 const store = {
   db: null, uid: null, ready: false,
   async init() {
+    if (this.ready) return;
     try {
       const db = window.claude && window.claude.use ? await window.claude.use("db") : null;
       const user = window.claude && window.claude.use ? await window.claude.use("user") : null;
@@ -467,6 +564,7 @@ const store = {
         if (d && typeof d.v === "string") { const v = JSON.parse(d.v); return v == null ? fallback : v; }
         return fallback;
       }
+      if (Vault.isOpen()) return Vault.get("jordynai_" + k, fallback);
       const raw = localStorage.getItem("jordynai_" + k);
       const v = raw ? JSON.parse(raw) : null; return v == null ? fallback : v;
     } catch (e) { return fallback; }
@@ -474,6 +572,7 @@ const store = {
   async set(k, value) {
     try {
       if (this.db) { await this.ref(k).set({ v: JSON.stringify(value), at: Date.now() }); return true; }
+      if (Vault.isOpen()) return Vault.set("jordynai_" + k, value);
       localStorage.setItem("jordynai_" + k, JSON.stringify(value)); return true;
     } catch (e) { return false; }
   },
@@ -1047,6 +1146,175 @@ function BlankPreview({ o }) {
   return <canvas ref={ref} className="bg-white shadow-lg" style={{ width: 300, height: 424 }} />;
 }
 
+/* ===================== LOCK SCREEN + SECURITY ===================== */
+const IDLE_MS = 15 * 60 * 1000;
+const pwProblem = (a, b) => (a.length < 8 ? "Use at least 8 characters." : a !== b ? "The two passwords don't match." : "");
+function GateShell({ children }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <div className="glass-strong rounded-2xl p-6 w-full max-w-md">
+        <div className="text-center mb-4">
+          <img src="assets/logo-120.png" alt="" className="w-14 h-14 mx-auto rounded-xl mb-2" onError={e => { e.currentTarget.style.display = "none"; }} />
+          <h1 className="text-xl font-black text-white">Jordyn<span className="text-cyan-400">AI</span> Exam Analyzer</h1>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+const PwInput = props => <input type="password" autoComplete="off" {...props} className="w-full bg-slate-900/70 border border-white/10 rounded-lg px-3 py-2.5 text-slate-100 outline-none focus:ring-2 focus:ring-cyan-400" />;
+
+function RecoveryShow({ code, onDone }) {
+  const [ok, setOk] = useState(false);
+  return (
+    <div>
+      <h2 className="text-lg font-black text-white mb-1">📝 Your recovery code</h2>
+      <p className="text-sm text-slate-300 mb-3">Write these 12 words on paper and keep them somewhere safe. If you forget your password, they're the only way (besides the admin) to open your data. They won't be shown again.</p>
+      <div className="grid grid-cols-3 gap-2 bg-slate-950/70 rounded-xl p-3 mb-3">
+        {code.split(" ").map((w, i) => <span key={i} className="font-mono text-sm text-amber-200"><span className="text-slate-500 text-xs">{i + 1}.</span> {w}</span>)}
+      </div>
+      <label className="flex items-center gap-2 text-sm text-slate-200 mb-3"><input type="checkbox" checked={ok} onChange={e => setOk(e.target.checked)} className="accent-cyan-400" /> I wrote down the 12 words.</label>
+      <button disabled={!ok} onClick={onDone} className="w-full py-3 rounded-xl bg-emerald-500 text-slate-950 font-black disabled:opacity-30">Continue</button>
+    </div>
+  );
+}
+
+function Gate({ children }) {
+  const [phase, setPhase] = useState("loading");      // loading | open | setup | locked | recovery
+  const [mode, setMode] = useState("password");       // password | recovery | admin
+  const [a, setA] = useState(""), [b, setB] = useState("");
+  const [err, setErr] = useState(""), [busy, setBusy] = useState(false);
+  const [code, setCode] = useState("");
+  const [hasAdmin, setHasAdmin] = useState(false);
+  const [byAdmin, setByAdmin] = useState(false);
+  const idle = useRef(null);
+
+  useEffect(() => { (async () => {
+    await store.init();
+    if (store.db) { setPhase("open"); return; }                // inside Claude: protected by the Claude account
+    setHasAdmin(!!(await Vault.loadAdminKey()));
+    setPhase(Vault.exists() ? "locked" : "setup");
+  })(); }, []);
+
+  // auto-lock after 15 minutes without activity
+  useEffect(() => {
+    if (phase !== "open" || store.db) return;
+    const reset = () => { clearTimeout(idle.current); idle.current = setTimeout(lockNow, IDLE_MS); };
+    const evs = ["pointerdown", "keydown", "scroll", "touchstart"];
+    evs.forEach(e => window.addEventListener(e, reset, { passive: true })); reset();
+    window.__jordynLock = lockNow;
+    return () => { clearTimeout(idle.current); evs.forEach(e => window.removeEventListener(e, reset)); };
+  }, [phase]);
+
+  function lockNow() { Vault.lock(); setA(""); setB(""); setErr(""); setMode("password"); setByAdmin(false); setPhase("locked"); }
+
+  const create = async () => {
+    const p = pwProblem(a, b); if (p) return setErr(p);
+    setBusy(true); setErr("");
+    try { const c = await Vault.create(a); setCode(c); setPhase("recovery"); setA(""); setB(""); } catch (e) { setErr("Couldn't create the lock on this browser."); }
+    setBusy(false);
+  };
+  const unlock = async () => {
+    if (!a) return; setBusy(true); setErr("");
+    try { await Vault.unlock(mode, a); setA(""); setByAdmin(mode !== "password"); setPhase("open"); }
+    catch (e) { setErr(mode === "admin" ? (e.message === "no-admin" ? "No admin key is set up for this website yet." : "Wrong master password.") : mode === "recovery" ? "That recovery code doesn't match." : "Wrong password."); }
+    setBusy(false);
+  };
+
+  if (phase === "loading") return <div className="min-h-screen flex items-center justify-center text-cyan-300">Loading JordynAI…</div>;
+  if (phase === "open") return <>
+    {byAdmin && <div className="bg-amber-500/20 border-b border-amber-400/40 text-amber-100 text-xs text-center p-2">Unlocked with the {Vault.unlockedBy === "admin" ? "admin master password" : "recovery code"}. Set a new password in History → Security.</div>}
+    {children}
+  </>;
+  if (phase === "recovery") return <GateShell><RecoveryShow code={code} onDone={() => { setCode(""); setPhase("open"); }} /></GateShell>;
+  if (phase === "setup") return (
+    <GateShell>
+      <h2 className="text-lg font-black text-white mb-1">🔒 Create your password</h2>
+      <p className="text-sm text-slate-300 mb-3">Your classes, learner lists and results on this device will be <b>encrypted</b> with this password. Each teacher sets their own password on their own device.{hasAdmin ? " The school admin's master password can also open it if you forget yours." : ""}</p>
+      <div className="space-y-2">
+        <PwInput placeholder="New password (8+ characters)" value={a} onChange={e => setA(e.target.value)} />
+        <PwInput placeholder="Type it again" value={b} onChange={e => setB(e.target.value)} onKeyDown={e => e.key === "Enter" && create()} />
+      </div>
+      {err && <p className="text-sm text-red-300 mt-2">{err}</p>}
+      <button disabled={busy} onClick={create} className="w-full mt-4 py-3 rounded-xl bg-cyan-500 text-slate-950 font-black disabled:opacity-40">{busy ? "Setting up…" : "Create password"}</button>
+    </GateShell>
+  );
+  // locked
+  return (
+    <GateShell>
+      <div className="flex gap-1 bg-slate-900/60 rounded-xl p-1 mb-3 text-xs">
+        {[["password", "Password"], ["recovery", "Recovery code"], ...(hasAdmin ? [["admin", "Admin"]] : [])].map(([k, l]) =>
+          <button key={k} onClick={() => { setMode(k); setA(""); setErr(""); }} className={`flex-1 py-2 rounded-lg ${mode === k ? "bg-cyan-500 text-slate-950 font-bold" : "text-slate-300"}`}>{l}</button>)}
+      </div>
+      {mode === "password" && <PwInput autoFocus placeholder="Password" value={a} onChange={e => setA(e.target.value)} onKeyDown={e => e.key === "Enter" && unlock()} />}
+      {mode === "admin" && <><p className="text-xs text-slate-400 mb-2">For the school admin only.</p><PwInput autoFocus placeholder="Admin master password" value={a} onChange={e => setA(e.target.value)} onKeyDown={e => e.key === "Enter" && unlock()} /></>}
+      {mode === "recovery" && <><p className="text-xs text-slate-400 mb-2">Type your 12 words with spaces between them.</p>
+        <textarea autoFocus value={a} onChange={e => setA(e.target.value)} rows={3} className="w-full bg-slate-900/70 border border-white/10 rounded-lg px-3 py-2 text-slate-100 font-mono text-sm outline-none focus:ring-2 focus:ring-cyan-400" /></>}
+      {err && <p className="text-sm text-red-300 mt-2">{err}</p>}
+      <button disabled={busy || !a} onClick={unlock} className="w-full mt-4 py-3 rounded-xl bg-cyan-500 text-slate-950 font-black disabled:opacity-40">{busy ? "Unlocking…" : "🔓 Unlock"}</button>
+      <details className="mt-4 text-xs text-slate-500">
+        <summary className="cursor-pointer">Forgot everything?</summary>
+        <p className="mt-2">Without your password, your recovery code or the admin, the data on this device can't be opened. You can erase it and start fresh.</p>
+        <button onClick={() => { if (window.__eraseArmed) { Vault.erase(); window.location.reload(); } else { window.__eraseArmed = true; setErr("Tap 'Erase this device' again to confirm. Everything on this device will be deleted."); } }} className="mt-2 px-3 py-1.5 rounded-lg bg-red-600/80 text-white font-bold">Erase this device</button>
+      </details>
+    </GateShell>
+  );
+}
+
+/* Security card (History tab) */
+function SecurityCard({ flash, saveFile }) {
+  const [cur, setCur] = useState(""), [p1, setP1] = useState(""), [p2, setP2] = useState("");
+  const [msg, setMsg] = useState(""), [code, setCode] = useState("");
+  const [m1, setM1] = useState(""), [m2, setM2] = useState(""), [adminMsg, setAdminMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (store.db) return <Card><h3 className="font-black text-white mb-1">🔒 Security</h3><p className="text-xs text-slate-400">Inside Claude, your data is protected by your Claude account. The password lock is used on the website version.</p></Card>;
+  const change = async () => {
+    const p = pwProblem(p1, p2); if (p) return setMsg(p);
+    setBusy(true); setMsg("");
+    try {
+      if (Vault.unlockedBy === "password") { const v = JSON.parse(localStorage.getItem(VAULT_KEY)); await unwrapWithSecret(v.wraps.pw, cur); }   // check current password
+      await Vault.setPassword(p1); setCur(""); setP1(""); setP2(""); setMsg("✔ Password changed."); flash("Password changed.");
+    } catch (e) { setMsg("Your current password is wrong."); }
+    setBusy(false);
+  };
+  const makeAdminKey = async () => {
+    const p = pwProblem(m1, m2); if (p) return setAdminMsg(p);
+    if (m1.length < 12) return setAdminMsg("Use at least 12 characters for the master password.");
+    setBusy(true);
+    try { const k = await createAdminKey(m1); await saveFile(JSON.stringify(k, null, 2), "admin-key.json", "application/json"); setM1(""); setM2(""); setAdminMsg("✔ admin-key.json created. Send this file to Claude (or upload it to the website repo) to switch the admin lock on. Keep your master password secret; it is not in the file."); }
+    catch (e) { setAdminMsg("Couldn't create the admin key."); }
+    setBusy(false);
+  };
+  return (
+    <Card>
+      <h3 className="font-black text-white mb-1">🔒 Security</h3>
+      <p className="text-xs text-slate-400 mb-3">Data on this device is encrypted. Auto-lock after 15 minutes without use. Admin lock: {Vault.adminKey ? <b className="text-emerald-300">ON</b> : <b className="text-amber-300">not set up</b>}.</p>
+      <div className="flex flex-wrap gap-2 mb-4">
+        <button onClick={() => window.__jordynLock && window.__jordynLock()} className="px-3 py-1.5 text-xs rounded-lg bg-white/10">🔒 Lock now</button>
+        <button onClick={async () => setCode(await Vault.newRecovery())} className="px-3 py-1.5 text-xs rounded-lg bg-white/10">📝 New recovery code</button>
+      </div>
+      {code && <div className="mb-4"><RecoveryShow code={code} onDone={() => setCode("")} /></div>}
+      <div className="grid sm:grid-cols-3 gap-2">
+        {Vault.unlockedBy === "password" && <PwInput placeholder="Current password" value={cur} onChange={e => setCur(e.target.value)} />}
+        <PwInput placeholder="New password" value={p1} onChange={e => setP1(e.target.value)} />
+        <PwInput placeholder="New password again" value={p2} onChange={e => setP2(e.target.value)} />
+      </div>
+      <button disabled={busy} onClick={change} className="mt-2 px-4 py-2 text-sm rounded-lg bg-cyan-500 text-slate-950 font-bold disabled:opacity-40">Change password</button>
+      {msg && <p className="text-xs text-slate-300 mt-1">{msg}</p>}
+      <details className="mt-5">
+        <summary className="text-xs text-amber-300 cursor-pointer">Admin only: create the admin master key</summary>
+        <p className="text-xs text-slate-400 mt-2">Choose your admin master password (12+ characters). The app creates <b>admin-key.json</b>, which lets every device add an admin lock that only your master password opens. The password itself is never saved. If you lose it, make a new key; devices update on their next unlock.</p>
+        <div className="grid sm:grid-cols-2 gap-2 mt-2">
+          <PwInput placeholder="Admin master password" value={m1} onChange={e => setM1(e.target.value)} />
+          <PwInput placeholder="Type it again" value={m2} onChange={e => setM2(e.target.value)} />
+        </div>
+        <button disabled={busy} onClick={makeAdminKey} className="mt-2 px-4 py-2 text-sm rounded-lg bg-amber-400 text-slate-950 font-bold disabled:opacity-40">Create admin-key.json</button>
+        {adminMsg && <p className="text-xs text-slate-300 mt-1">{adminMsg}</p>}
+      </details>
+    </Card>
+  );
+}
+
 /* ===================== APP ===================== */
 function App() {
   const [loaded, setLoaded] = useState(false);
@@ -1354,6 +1622,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
     const keys = ["profile", "config", "key", "keySaved", "classes", "history", "passMark", "passMarkV2", ...classes.map(rosterKey)];
     let ok = true;
     for (const k of keys) { if (!(await store.set(k, null))) ok = false; }
+    if (!store.db) { Vault.erase(); window.location.reload(); return; }   // website: back to "create password"
     try { Object.keys(localStorage).filter(k => k.startsWith("jordynai_")).forEach(k => localStorage.removeItem(k)); } catch (e) {}
     setProfile(DEFAULT_PROFILE); setConfig(DEFAULT_CONFIG); setKey(Array(50).fill("A")); setKeySaved(false);
     setClasses([]); setRosters({}); setHistory([]); setPassMark(70); setStudents([]); setRawText("");
@@ -1417,6 +1686,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={() => setModal("profile")} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 hover:bg-white/15">🏫 Edit Profile / School</button>
+            {!store.db && <button onClick={() => window.__jordynLock && window.__jordynLock()} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 hover:bg-white/15" title="Lock now">🔒 Lock</button>}
             <button disabled={!unlocked} onClick={() => setModal("copyAS")} className="px-3 py-1.5 text-xs rounded-lg bg-amber-400 text-slate-950 font-bold disabled:opacity-30">📄 Copy A/S</button>
           </div>
         </div>
@@ -1539,6 +1809,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
               <button onClick={loadJson} className="mt-1 px-3 py-1.5 text-xs rounded-lg bg-cyan-500 text-slate-950 font-bold">Load JSON</button>
             </details>
           </Card>
+          <SecurityCard flash={flash} saveFile={saveFile} />
         </>}
 
         {tab === "scan" && unlocked && <>
@@ -1729,7 +2000,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")).render(<Gate><App /></Gate>);
 
 </script>
 </body>

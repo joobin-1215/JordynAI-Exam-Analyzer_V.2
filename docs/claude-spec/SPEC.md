@@ -1,7 +1,7 @@
 # JordynAI Exam Analyzer: Claude Design Spec (source of truth)
 
 Owner: **Joven R. Castro**, Teacher II (MAPEH), Leon Garcia Sr. National High School, Schools Division of Davao City, Region XI.
-Spec version: **1.2 · Nov 10, 2026** (free on-device bubble reader) (aligned with DepEd Order No. 15, s. 2026, as reported; verify against the official text). This file overrides older plans and existing code (see `/AGENTS.md`).
+Spec version: **1.3 · Nov 10, 2026** (password lock + encrypted device data) (aligned with DepEd Order No. 15, s. 2026, as reported; verify against the official text). This file overrides older plans and existing code (see `/AGENTS.md`).
 
 Two builds follow this spec:
 - **Android app** (this repo: Kotlin, Jetpack Compose, Firebase), built by Google AI Studio.
@@ -60,6 +60,17 @@ These apply to the class MPS, the Boys/Girls MPS, each component's MPS, and each
 - A printable **Code List** (codes + names) is generated on the device for the teacher, to hand out sheets.
 - Earlier rule (still applies to on-screen reports):
 Names are shown and exported as **initials**: the first letters of the first name(s), then of the last name(s). `Dela Cruz, Juan` → `J.D.C.`; `Juan Dela Cruz` → `J.D.C.`; `Amor, Maria Clara` → `M.C.A.`; already-initials text stays. The learner ID always appears beside the initials.
+
+### 2.6 Password lock and encrypted device data (owner decision, Nov 10)
+- Users: the owner (admin) and co-teachers, **each with their own password on their own device**. Data lives on the device (§2.5), so the password protects that device's data.
+- **First use** (website): "Create your password" (8+ characters, typed twice), then a one-time **12-word recovery code** the teacher must confirm they wrote down. Existing unencrypted data is moved into the vault.
+- **Encryption** (Web Crypto; Android: Keystore + the same scheme): a random 256-bit data key (AES-GCM) encrypts everything (`jordynai_vault`). The data key is wrapped three ways: (1) the password, via PBKDF2-SHA256 with 310,000 iterations; (2) the recovery code, same KDF; (3) the **admin public key** (ECDH P-256 + AES-GCM). No plain learner data is stored; the master password is never stored.
+- **Admin master password:** the admin creates **admin-key.json** in Security (master password 12+ characters). The file holds the public key plus the private key encrypted with the master password, so it's safe to publish. Placed next to the app (website root), every device adds the admin lock at its next unlock. **Lock screen tabs:** Password · Recovery code · Admin. Unlocking by admin or recovery shows a banner and lets the user set a new password without the old one.
+- **Auto-lock** after 15 minutes without activity, and on every reload or close. A "🔒 Lock" button sits in the header. A **Security card** (Class Setup) has Lock now, Change password, New recovery code, and "Admin only: create the admin master key".
+- Forgot everything → "Erase this device" (tap twice). RESET ALL DATA also erases the vault and returns to "Create your password".
+- Inside Claude (artifact with `db`), the Claude account protects the data; the lock isn't shown.
+- **Honest limit:** the website's code is public; the password protects the data, not the page itself. Real page-level login would need Cloudflare Access (not chosen).
+- Reference: `Vault`, `Gate`, `SecurityCard`, `createAdminKey` in `reference/web-app-reference.html`.
 
 ## 3. Exam configuration
 - **Term:** Term 1 / Term 2 / Term 3 (default from today's date: Jun 8–Sep 15 → Term 1, Sep 16–Dec → Term 2, Jan–Apr → Term 3).
