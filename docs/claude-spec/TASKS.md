@@ -79,5 +79,9 @@ Per-device password, 12-word recovery code, admin public-key lock (admin-key.jso
 Multi-level corner search, 150 ms checks, 2-frame stability, darkness ≥ 0.40 rule, CameraX torch on (toggle), Name line on sheets, lighter stripes, encrypted per-learner sheet image + name strip (Room/EncryptedFile), viewer, ZIP export with Grade & Section / Exam folders; on Android also "Save to Downloads/JordynAI Answer Sheets/…" via MediaStore **after the owner approves the storage permission**.
 **Checks:** capture-to-saved < 1 s; erased marks never read as answers; images unreadable without the password; ZIP folder structure as in SPEC 8.
 
+## T17. Google sign-in + one history per email per device (SPEC 7.3)
+Android: Credential Manager "Sign in with Google" using the EXISTING Firebase/OAuth setup (do not change the package name, SHA-1 or Firebase project). Per-email encrypted local database (Room + SQLCipher or per-account EncryptedFile), device password + recovery code, Switch account, Reset All per email behind a confirmation (Turnstile is web-only; on Android use Play Integrity only if the owner approves).
+**Checks:** never asks for an email password; email A can't open email B's data; new device = empty history; Reset All erases only the signed-in email.
+
 ---
 When all tasks are done, tell the owner, and ask Claude to update `SPEC.md` / `DECISIONS.md` if anything had to differ.

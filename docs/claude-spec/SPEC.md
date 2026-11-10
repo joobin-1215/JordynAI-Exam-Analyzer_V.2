@@ -1,7 +1,7 @@
 # JordynAI Exam Analyzer: Claude Design Spec (source of truth)
 
 Owner: **Joven R. Castro**, Teacher II (MAPEH), Leon Garcia Sr. National High School, Schools Division of Davao City, Region XI.
-Spec version: **1.4 · Nov 10, 2026** (faster scanner, name line, saved sheet images) (aligned with DepEd Order No. 15, s. 2026, as reported; verify against the official text). This file overrides older plans and existing code (see `/AGENTS.md`).
+Spec version: **1.5 · Nov 10, 2026** (email sign-in per device, human check on Reset All) (aligned with DepEd Order No. 15, s. 2026, as reported; verify against the official text). This file overrides older plans and existing code (see `/AGENTS.md`).
 
 Two builds follow this spec:
 - **Android app** (this repo: Kotlin, Jetpack Compose, Firebase), built by Google AI Studio.
@@ -147,6 +147,16 @@ Grade (Kinder, Grade 1–12) plus Section (uppercase). Saved classes appear as q
 - Named and blank sheets have a **blank Name line for the learner to write** "Last, First". Directions: "Write your NAME (Last, First) on the Name line." The code still identifies the learner; the name is a reference only.
 - Row stripes are very light (#f6f7fb) so they never print dark.
 - Paper-brightness probes sit in the margins only (x 3 mm and 101.5 mm), so handwriting can't affect them.
+
+## 7.3 Email sign-in, one history per email per device (owner decision, Nov 10)
+- **Sign in with Google** (Google Identity Services). Google checks the email password on Google's page; **the app never asks for or stores anyone's email password.** The website checks the ID token (audience = our Web Client ID, issuer, expiry, verified email, RS256 signature via Google's public keys when online).
+- Without a Google Client ID configured (or offline), the teacher types the email; the screen warns "Never type your Gmail/email password here."
+- Account id = SHA-256("jordynai|" + lowercase email), first 12 bytes. Each email has its **own encrypted vault** (`jordynai_vault:<id>`) and **own image store** (`jordynai_images:<id>`) on that device, opened with a **device password** the teacher makes (plus the 12-word recovery code and the admin lock, as in 7.1).
+- Same email on a **device that has its history** → its data comes back after the device password. Same email on a **new device** → a new, empty history (nothing syncs between devices). Unknown email on a device → new history.
+- Data saved before accounts (`jordynai_vault`) can be moved into the signed-in email with the old password, or left and a new history started.
+- **RESET ALL DATA (History tab)** erases only the signed-in email's data on this device and first requires **Cloudflare Turnstile "Verify you are human"**. Site key is public (`window.JORDYNAI_CONFIG.turnstileSiteKey`); until set, Cloudflare's test key is used and the box says "Test mode". Without a server, the check runs in the browser only (blocks bots and accidents, not a determined person with the device password).
+- Header shows the signed-in email (masked) with Lock and Switch account.
+- **Change control:** only the owner's GitHub account (joobin-1215) may push to either repo. No collaborators, no deploy keys, no other accounts. AI Studio pushes only through the owner's linked GitHub account and only after the owner approves.
 
 ## 8. Scanner
 - Portrait viewfinder in a 1 : 1.414 frame with corner guides and the label "One quarter-sheet, portrait, 4 corners in view". One sheet per photo.

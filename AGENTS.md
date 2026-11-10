@@ -34,3 +34,6 @@ Spec files:
 - `docs/claude-spec/DECISIONS.md`: dated log of the owner's decisions (newest first)
 - `docs/claude-spec/AI_STUDIO_PROMPT.md`: the kickoff prompt the owner pastes into Google AI Studio
 - `docs/claude-spec/reference/`: working reference implementation (web), grading core (JS + test), answer sheet (HTML + print CSS + PDF generator), and `grading-fixes.patch`
+
+## Who may change this project
+Only the owner account joobin-1215 may push. Never add collaborators, deploy keys, tokens or other accounts, and never ask any user for an email password: sign-in is Google's own sign-in only.

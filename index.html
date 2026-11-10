@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JordynAI Exam Analyzer</title>
+<script>
+/* Public settings (safe to publish). googleClientId = the WEB Client ID from Google Cloud; turnstileSiteKey = the Cloudflare Turnstile SITE key (never the secret key). */
+window.JORDYNAI_CONFIG = { googleClientId: "", turnstileSiteKey: "" };
+</script>
 <script src="https://cdn.tailwindcss.com"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
@@ -466,7 +470,23 @@ const loadImage = blob => new Promise((res, rej) => { const u = URL.createObject
 /* Data on this device is encrypted with a random key (DEK). The DEK is locked ("wrapped") three ways:
    1) the teacher's password, 2) a 12-word recovery code, 3) the admin's public key (only the admin master password opens it).
    Nothing secret is stored in plain text, and the master password is never stored anywhere. */
-const VAULT_KEY = "jordynai_vault";
+const VAULT_KEY = "jordynai_vault";            // legacy (before accounts): one vault per device
+/* ACCOUNTS: each email gets its own encrypted vault + image store on THIS device.
+   Same email on another device = a new, empty history there (nothing is synced). */
+const ACCTS_KEY = "jordynai_accounts";
+const CFG = Object.assign({ googleClientId: "", turnstileSiteKey: "" }, window.JORDYNAI_CONFIG || {});
+const TURNSTILE_TEST_KEY = "1x00000000000000000000AA";   // Cloudflare's public test key (always passes)
+const maskEmail = e => { const [u, d] = String(e).split("@"); return (u.length <= 2 ? u[0] + "•" : u.slice(0, 2) + "•••") + "@" + (d || ""); };
+const Acct = {
+  id: "", email: "", hint: "", via: "",
+  async idFor(email) { const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("jordynai|" + String(email).trim().toLowerCase()))); return Array.from(h.slice(0, 12), b => b.toString(16).padStart(2, "0")).join(""); },
+  async use(email, via) { this.email = String(email).trim().toLowerCase(); this.id = await this.idFor(this.email); this.hint = maskEmail(this.email); this.via = via; imgStore.close(); },
+  clear() { this.id = this.email = this.hint = this.via = ""; imgStore.close(); },
+  list() { try { return JSON.parse(localStorage.getItem(ACCTS_KEY) || "[]"); } catch (e) { return []; } },
+  remember() { if (!this.id) return; const l = this.list().filter(a => a.id !== this.id); l.unshift({ id: this.id, hint: this.hint, last: Date.now() }); try { localStorage.setItem(ACCTS_KEY, JSON.stringify(l.slice(0, 20))); } catch (e) {} },
+  forget(id) { try { localStorage.setItem(ACCTS_KEY, JSON.stringify(this.list().filter(a => a.id !== id))); } catch (e) {} },
+};
+const vaultKey = () => (Acct.id ? "jordynai_vault:" + Acct.id : VAULT_KEY);
 const PBKDF2_ITER = 310000;
 const enc = new TextEncoder(), dec = new TextDecoder();
 const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
@@ -505,8 +525,17 @@ const newRecoveryCode = () => Array.from(rand(12), b => RECOVERY_WORDS[b]).join(
 const normCode = s => String(s || "").toLowerCase().trim().split(/\s+/).join(" ");
 
 const Vault = {
-  map: null, dek: null, rawDek: null, wraps: null, saveTimer: null, adminKey: null, unlockedBy: "",
-  exists() { try { return !!localStorage.getItem(VAULT_KEY); } catch (e) { return false; } },
+  map: null, dek: null, rawDek: null, wraps: null, saveTimer: null, adminKey: null, unlockedBy: "", gen: 0,
+  exists() { try { return !!localStorage.getItem(vaultKey()); } catch (e) { return false; } },
+  legacyExists() { try { return !!Acct.id && !!localStorage.getItem(VAULT_KEY); } catch (e) { return false; } },
+  /* move the pre-accounts vault (and its images) into the signed-in account; needs the old password */
+  async adoptLegacy(oldPw) {
+    const v = JSON.parse(localStorage.getItem(VAULT_KEY));
+    const raw = await unwrapWithSecret(v.wraps.pw, oldPw);                      // wrong password -> throws
+    localStorage.setItem(vaultKey(), JSON.stringify(v)); localStorage.removeItem(VAULT_KEY);
+    await imgStore.adoptLegacy();
+    await this.open(raw, v.wraps, "password");
+  },
   isOpen() { return !!this.map; },
   async loadAdminKey() {
     if (this.adminKey !== null) return this.adminKey;
@@ -517,7 +546,7 @@ const Vault = {
   async open(rawDek, wraps, by) {
     this.rawDek = rawDek; this.wraps = wraps; this.unlockedBy = by;
     this.dek = await crypto.subtle.importKey("raw", rawDek, "AES-GCM", false, ["encrypt", "decrypt"]);
-    const v = JSON.parse(localStorage.getItem(VAULT_KEY));
+    const v = JSON.parse(localStorage.getItem(vaultKey()));
     this.map = v.data ? JSON.parse(dec.decode(await aesDec(this.dek, v.data))) : {};
     const ak = await this.loadAdminKey();                                       // add the admin lock if it's missing or outdated
     if (ak && (!wraps.admin || wraps.admin.kid !== ak.kid)) { this.wraps.admin = await wrapForAdmin(rawDek, ak); await this.save(); }
@@ -527,8 +556,8 @@ const Vault = {
     const wraps = { pw: await wrapWithSecret(rawDek, password), rc: await wrapWithSecret(rawDek, normCode(code)) };
     const ak = await this.loadAdminKey(); if (ak) wraps.admin = await wrapForAdmin(rawDek, ak);
     // move any existing plain data into the vault
-    const map = {}; Object.keys(localStorage).filter(k => k.startsWith("jordynai_") && k !== VAULT_KEY).forEach(k => { try { map[k] = JSON.parse(localStorage.getItem(k)); } catch (e) {} });
-    localStorage.setItem(VAULT_KEY, JSON.stringify({ v: 1, wraps, data: null }));
+    const map = {}; Object.keys(localStorage).filter(k => k.startsWith("jordynai_") && !k.startsWith("jordynai_vault") && k !== ACCTS_KEY).forEach(k => { try { map[k] = JSON.parse(localStorage.getItem(k)); } catch (e) {} });
+    localStorage.setItem(vaultKey(), JSON.stringify({ v: 1, wraps, data: null }));
     this.rawDek = rawDek; this.wraps = wraps; this.unlockedBy = "password";
     this.dek = await crypto.subtle.importKey("raw", rawDek, "AES-GCM", false, ["encrypt", "decrypt"]);
     this.map = map; await this.save();
@@ -536,7 +565,7 @@ const Vault = {
     return code;
   },
   async unlock(kind, secret) {
-    const v = JSON.parse(localStorage.getItem(VAULT_KEY)), w = v.wraps;
+    const v = JSON.parse(localStorage.getItem(vaultKey())), w = v.wraps;
     let raw;
     if (kind === "password") raw = await unwrapWithSecret(w.pw, secret);
     else if (kind === "recovery") raw = await unwrapWithSecret(w.rc, normCode(secret));
@@ -546,26 +575,31 @@ const Vault = {
   async setPassword(newPw) { this.wraps.pw = await wrapWithSecret(this.rawDek, newPw); await this.save(); },
   async newRecovery() { const code = newRecoveryCode(); this.wraps.rc = await wrapWithSecret(this.rawDek, normCode(code)); await this.save(); return code; },
   async save() {
-    const map = this.map, dek = this.dek, wraps = this.wraps;   // captured now: lock() may clear them while this runs
+    const map = this.map, dek = this.dek, wraps = this.wraps, key = vaultKey(), gen = this.gen;   // captured now: lock()/switch may clear them while this runs
     if (!map || !dek) return;
     const data = await aesEnc(dek, enc.encode(JSON.stringify(map)));
-    localStorage.setItem(VAULT_KEY, JSON.stringify({ v: 1, wraps, data }));
+    if (gen !== this.gen) return;                                                // erased meanwhile: don't write it back
+    localStorage.setItem(key, JSON.stringify({ v: 1, wraps, data }));
   },
   get(k, fb) { const v = this.map ? this.map[k] : undefined; return v == null ? fb : JSON.parse(JSON.stringify(v)); },
   set(k, v) { if (!this.map) return false; if (v == null) delete this.map[k]; else this.map[k] = v; clearTimeout(this.saveTimer); this.saveTimer = setTimeout(() => this.save(), 250); return true; },
   async flush() { clearTimeout(this.saveTimer); await this.save(); },
   lock() { clearTimeout(this.saveTimer); this.save(); this.map = null; this.dek = null; this.rawDek = null; this.wraps = null; this.unlockedBy = ""; },
-  erase() { this.lock(); try { Object.keys(localStorage).filter(k => k.startsWith("jordynai_")).forEach(k => localStorage.removeItem(k)); } catch (e) {} },
+  /* erase ONLY the signed-in account's data on this device (other emails on this device are untouched) */
+  erase() { clearTimeout(this.saveTimer); this.gen++; this.map = null; this.dek = null; this.rawDek = null; this.wraps = null; this.unlockedBy = ""; try { localStorage.removeItem(vaultKey()); if (Acct.id) Acct.forget(Acct.id); else Object.keys(localStorage).filter(k => k.startsWith("jordynai_") && !k.startsWith("jordynai_vault:") && k !== ACCTS_KEY).forEach(k => localStorage.removeItem(k)); } catch (e) {} },
 };
 
 
 /* ===================== SHEET IMAGES (IndexedDB on this device; encrypted with the password key on the website) ===================== */
 const NAME_STRIP = [5, 18.6, 78, 29.6];   // mm: Name + Grade & Section lines
 const imgStore = {
-  _db: null,
+  _db: null, _name: "",
+  dbName: () => (Acct.id ? "jordynai_images:" + Acct.id : "jordynai_images"),
+  close() { try { this._db && this._db.close(); } catch (e) {} this._db = null; },
   async db() {
-    if (this._db) return this._db;
-    this._db = await new Promise((res, rej) => { const rq = indexedDB.open("jordynai_images", 1); rq.onupgradeneeded = () => rq.result.createObjectStore("sheets"); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); });
+    if (this._db && this._name === this.dbName()) return this._db;
+    this.close(); this._name = this.dbName();
+    this._db = await new Promise((res, rej) => { const rq = indexedDB.open(this._name, 1); rq.onupgradeneeded = () => rq.result.createObjectStore("sheets"); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); });
     return this._db;
   },
   async tx(mode, fn) { const db = await this.db(); return new Promise((res, rej) => { const t = db.transaction("sheets", mode); const rq = fn(t.objectStore("sheets")); t.oncomplete = () => res(rq ? rq.result : undefined); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error); }); },
@@ -583,7 +617,17 @@ const imgStore = {
   async put(meta, code, sheet, name) { try { const rec = { sheet: await this.seal(sheet), name: name ? await this.seal(name) : null, meta: { ...meta, code }, at: Date.now() }; await this.tx("readwrite", st => st.put(rec, this.key(meta, code))); return true; } catch (e) { return false; } },
   async get(k) { try { const rec = await this.tx("readonly", st => st.get(k)); if (!rec) return null; return { sheet: await this.unseal(rec.sheet), name: await this.unseal(rec.name), meta: rec.meta }; } catch (e) { return null; } },
   async keys(prefix = "") { try { return (await this.tx("readonly", st => st.getAllKeys())).filter(k => String(k).startsWith(prefix)); } catch (e) { return []; } },
-  async wipe() { try { this._db && this._db.close(); this._db = null; await new Promise(r => { const rq = indexedDB.deleteDatabase("jordynai_images"); rq.onsuccess = rq.onerror = rq.onblocked = () => r(); }); } catch (e) {} },
+  async wipe() { try { const n = this.dbName(); this.close(); await new Promise(r => { const rq = indexedDB.deleteDatabase(n); rq.onsuccess = rq.onerror = rq.onblocked = () => r(); }); } catch (e) {} },
+  /* copy images from the pre-accounts store into this account, then delete the old store */
+  async adoptLegacy() {
+    try {
+      const old = await new Promise((res, rej) => { const rq = indexedDB.open("jordynai_images", 1); rq.onupgradeneeded = () => rq.result.createObjectStore("sheets"); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); });
+      const all = await new Promise((res, rej) => { const t = old.transaction("sheets", "readonly"), st = t.objectStore("sheets"), ks = st.getAllKeys(), vs = st.getAll(); t.oncomplete = () => res(ks.result.map((k, i) => [k, vs.result[i]])); t.onerror = () => rej(t.error); });
+      old.close();
+      for (const [k, v] of all) await this.tx("readwrite", st => st.put(v, k));
+      await new Promise(r => { const rq = indexedDB.deleteDatabase("jordynai_images"); rq.onsuccess = rq.onerror = rq.onblocked = () => r(); });
+    } catch (e) {}
+  },
 };
 const safeName = s => String(s).replace(/[\u2013\u2014]/g, "-").replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim();
 /* every saved image as { path, blob }: JordynAI Answer Sheets/<Grade – Section>/<Term> <Exam> <Subject>/<code>.jpg + <code>_name.jpg */
@@ -1235,6 +1279,67 @@ function BlankPreview({ o }) {
   return <canvas ref={ref} className="bg-white shadow-lg" style={{ width: 300, height: 424 }} />;
 }
 
+/* ===================== GOOGLE SIGN-IN + CLOUDFLARE HUMAN CHECK (website only) ===================== */
+/* Google checks the password on Google's own page: this website never sees anyone's email password. */
+const loadScript = (src, id) => new Promise((res, rej) => {
+  if (document.getElementById(id)) { const el = document.getElementById(id); if (el.dataset.ok) return res(); el.addEventListener("load", () => res()); el.addEventListener("error", rej); return; }
+  const el = document.createElement("script"); el.src = src; el.async = true; el.id = id;
+  el.onload = () => { el.dataset.ok = "1"; res(); }; el.onerror = () => { el.remove(); rej(new Error("load")); };
+  document.head.appendChild(el); setTimeout(() => rej(new Error("timeout")), 10000);
+});
+const b64urlJson = s => JSON.parse(dec.decode(Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(s.length / 4) * 4, "=")), c => c.charCodeAt(0))));
+/* Check the Google ID token: audience, issuer, expiry, verified email, and (when Google's keys can be fetched) the RS256 signature. */
+async function checkGoogleToken(jwt) {
+  const [h, p, sig] = String(jwt).split(".");
+  const head = b64urlJson(h), pay = b64urlJson(p);
+  if (pay.aud !== CFG.googleClientId) throw new Error("aud");
+  if (!["accounts.google.com", "https://accounts.google.com"].includes(pay.iss)) throw new Error("iss");
+  if (!pay.exp || pay.exp * 1000 < Date.now() - 60000) throw new Error("exp");
+  if (!pay.email || pay.email_verified === false) throw new Error("email");
+  try {
+    const jwks = await (await fetch("https://www.googleapis.com/oauth2/v3/certs")).json();
+    const jwk = (jwks.keys || []).find(k => k.kid === head.kid);
+    if (jwk) {
+      const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+      const raw = Uint8Array.from(atob(sig.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(sig.length / 4) * 4, "=")), c => c.charCodeAt(0));
+      if (!(await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, raw, enc.encode(h + "." + p)))) throw new Error("sig");
+    }
+  } catch (e) { if (e.message === "sig") throw e; }   // offline key fetch: the token still came straight from Google's button
+  return { email: pay.email, name: pay.name || "" };
+}
+function GoogleButton({ onEmail, onFail }) {
+  const box = useRef(null);
+  useEffect(() => { let alive = true; (async () => {
+    try {
+      await loadScript("https://accounts.google.com/gsi/client", "gsi-client");
+      if (!alive || !window.google || !google.accounts) throw new Error("gsi");
+      google.accounts.id.initialize({ client_id: CFG.googleClientId, auto_select: false, cancel_on_tap_outside: true, use_fedcm_for_button: true,
+        callback: async r => { try { const u = await checkGoogleToken(r.credential); onEmail(u.email); } catch (e) { onFail("Google sign-in couldn't be checked (" + e.message + "). Try again."); } } });
+      google.accounts.id.renderButton(box.current, { theme: "filled_black", size: "large", shape: "pill", text: "signin_with", width: 300 });
+    } catch (e) { if (alive) onFail("offline"); }
+  })(); return () => { alive = false; }; }, []);
+  return <div ref={box} className="flex justify-center min-h-[44px]" />;
+}
+/* Cloudflare Turnstile "Verify you are human" */
+function HumanCheck({ onPass }) {
+  const box = useRef(null); const [state, setState] = useState("loading");
+  const siteKey = CFG.turnstileSiteKey || TURNSTILE_TEST_KEY;
+  useEffect(() => { let alive = true, wid = null; (async () => {
+    try {
+      await loadScript("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit", "cf-turnstile");
+      if (!alive || !window.turnstile) throw new Error("ts");
+      wid = window.turnstile.render(box.current, { sitekey: siteKey, theme: "dark", callback: t => { setState("ok"); onPass(t); }, "expired-callback": () => { setState("ready"); onPass(""); }, "error-callback": () => setState("error") });
+      setState("ready");
+    } catch (e) { if (alive) setState("error"); }
+  })(); return () => { alive = false; try { wid != null && window.turnstile.remove(wid); } catch (e) {} }; }, []);
+  return <div className="my-3">
+    <div ref={box} className="flex justify-center min-h-[65px]" />
+    {state === "loading" && <p className="text-xs text-slate-400 text-center">Loading the "Verify you are human" check…</p>}
+    {state === "error" && <p className="text-xs text-amber-200 text-center">The human check couldn't load (no internet?). Connect to the internet and open this again.</p>}
+    {!CFG.turnstileSiteKey && <p className="text-[10px] text-slate-500 text-center mt-1">Test mode: the real Cloudflare key isn't set yet.</p>}
+  </div>;
+}
+
 /* ===================== LOCK SCREEN + SECURITY ===================== */
 const IDLE_MS = 15 * 60 * 1000;
 const pwProblem = (a, b) => (a.length < 8 ? "Use at least 8 characters." : a !== b ? "The two passwords don't match." : "");
@@ -1269,20 +1374,22 @@ function RecoveryShow({ code, onDone }) {
 }
 
 function Gate({ children }) {
-  const [phase, setPhase] = useState("loading");      // loading | open | setup | locked | recovery
+  const [phase, setPhase] = useState("loading");      // loading | signin | legacy | setup | locked | recovery | open
   const [mode, setMode] = useState("password");       // password | recovery | admin
   const [a, setA] = useState(""), [b, setB] = useState("");
   const [err, setErr] = useState(""), [busy, setBusy] = useState(false);
   const [code, setCode] = useState("");
   const [hasAdmin, setHasAdmin] = useState(false);
   const [byAdmin, setByAdmin] = useState(false);
+  const [offline, setOffline] = useState(!CFG.googleClientId);   // no Google set up (or no internet) -> type the email
+  const [email, setEmail] = useState("");
   const idle = useRef(null);
 
   useEffect(() => { (async () => {
     await store.init();
     if (store.db) { setPhase("open"); return; }                // inside Claude: protected by the Claude account
     setHasAdmin(!!(await Vault.loadAdminKey()));
-    setPhase(Vault.exists() ? "locked" : "setup");
+    setPhase("signin");
   })(); }, []);
 
   // auto-lock after 15 minutes without activity
@@ -1291,35 +1398,90 @@ function Gate({ children }) {
     const reset = () => { clearTimeout(idle.current); idle.current = setTimeout(lockNow, IDLE_MS); };
     const evs = ["pointerdown", "keydown", "scroll", "touchstart"];
     evs.forEach(e => window.addEventListener(e, reset, { passive: true })); reset();
-    window.__jordynLock = lockNow;
+    window.__jordynLock = lockNow; window.__jordynSwitch = switchAccount;
     return () => { clearTimeout(idle.current); evs.forEach(e => window.removeEventListener(e, reset)); };
   }, [phase]);
 
   function lockNow() { Vault.lock(); setA(""); setB(""); setErr(""); setMode("password"); setByAdmin(false); setPhase("locked"); }
+  function switchAccount() { Vault.lock(); Acct.clear(); try { window.google && google.accounts && google.accounts.id.disableAutoSelect(); } catch (e) {} setA(""); setB(""); setErr(""); setEmail(""); setMode("password"); setByAdmin(false); setPhase("signin"); }
 
+  // after Google (or the typed email) tells us WHO this is: open that email's data on this device, or start a new history
+  const signedIn = async (mail, via) => {
+    setErr(""); await Acct.use(mail, via);
+    setPhase(Vault.exists() ? "locked" : Vault.legacyExists() ? "legacy" : "setup");
+  };
+  const typedEmail = () => {
+    const m = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m)) return setErr("Type a valid email address.");
+    signedIn(m, "typed");
+  };
   const create = async () => {
     const p = pwProblem(a, b); if (p) return setErr(p);
     setBusy(true); setErr("");
-    try { const c = await Vault.create(a); setCode(c); setPhase("recovery"); setA(""); setB(""); } catch (e) { setErr("Couldn't create the lock on this browser."); }
+    try { const c = await Vault.create(a); Acct.remember(); setCode(c); setPhase("recovery"); setA(""); setB(""); } catch (e) { setErr("Couldn't create the lock on this browser."); }
     setBusy(false);
   };
   const unlock = async () => {
     if (!a) return; setBusy(true); setErr("");
-    try { await Vault.unlock(mode, a); setA(""); setByAdmin(mode !== "password"); setPhase("open"); }
+    try { await Vault.unlock(mode, a); Acct.remember(); setA(""); setByAdmin(mode !== "password"); setPhase("open"); }
     catch (e) { setErr(mode === "admin" ? (e.message === "no-admin" ? "No admin key is set up for this website yet." : "Wrong master password.") : mode === "recovery" ? "That recovery code doesn't match." : "Wrong password."); }
     setBusy(false);
   };
+  const adopt = async () => {
+    if (!a) return; setBusy(true); setErr("");
+    try { await Vault.adoptLegacy(a); Acct.remember(); setA(""); setPhase("open"); } catch (e) { setErr("Wrong password for the old data."); }
+    setBusy(false);
+  };
+  const who = <div className="flex items-center justify-between bg-slate-900/60 rounded-xl px-3 py-2 mb-3 text-sm">
+    <span className="text-slate-200">👤 <b>{Acct.hint}</b>{Acct.via === "google" && <span className="text-emerald-300 text-xs"> ✔ Google</span>}</span>
+    <button onClick={switchAccount} className="text-xs text-cyan-300 underline">Switch account</button></div>;
 
   if (phase === "loading") return <div className="min-h-screen flex items-center justify-center text-cyan-300">Loading JordynAI…</div>;
   if (phase === "open") return <>
+    {!store.db && <div className="bg-slate-950/80 border-b border-white/10 text-xs text-slate-300 flex items-center justify-end gap-3 px-4 py-1.5">
+      <span>👤 {Acct.hint || "This device"}</span>
+      <button onClick={lockNow} className="text-cyan-300 hover:underline">🔒 Lock</button>
+      {Acct.id && <button onClick={switchAccount} className="text-cyan-300 hover:underline">⇄ Switch account</button>}
+    </div>}
     {byAdmin && <div className="bg-amber-500/20 border-b border-amber-400/40 text-amber-100 text-xs text-center p-2">Unlocked with the {Vault.unlockedBy === "admin" ? "admin master password" : "recovery code"}. Set a new password in History → Security.</div>}
     {children}
   </>;
   if (phase === "recovery") return <GateShell><RecoveryShow code={code} onDone={() => { setCode(""); setPhase("open"); }} /></GateShell>;
+  if (phase === "signin") {
+    const known = Acct.list();
+    return (
+      <GateShell>
+        <h2 className="text-lg font-black text-white mb-1">👋 Sign in</h2>
+        {!offline ? <>
+          <p className="text-sm text-slate-300 mb-3">Sign in with your Google account. Google checks your password on its own page: <b>this website never sees your email password.</b></p>
+          <GoogleButton onEmail={m => signedIn(m, "google")} onFail={m => { if (m === "offline") { setOffline(true); setErr("Google sign-in couldn't load (no internet?). You can still open accounts saved on this device."); } else setErr(m); }} />
+        </> : <>
+          <p className="text-sm text-slate-300 mb-3">{CFG.googleClientId ? "No internet: type the email you used on this device." : "Type your email. Then make a NEW password just for this app."} <b className="text-amber-200">Never type your Gmail/email password here.</b></p>
+          <input type="email" autoComplete="email" placeholder="you@deped.gov.ph" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && typedEmail()} className="w-full bg-slate-900/70 border border-white/10 rounded-lg px-3 py-2.5 text-slate-100 outline-none focus:ring-2 focus:ring-cyan-400" />
+          <button onClick={typedEmail} className="w-full mt-3 py-3 rounded-xl bg-cyan-500 text-slate-950 font-black">Continue</button>
+        </>}
+        {err && <p className="text-sm text-red-300 mt-2">{err}</p>}
+        {known.length > 0 && <p className="text-xs text-slate-500 mt-4">Used on this device: {known.map(k => k.hint).join(", ")}</p>}
+        <p className="text-[11px] text-slate-500 mt-3">Your data stays on this device, locked per email. The same email on another device starts a new, empty history there.</p>
+      </GateShell>
+    );
+  }
+  if (phase === "legacy") return (
+    <GateShell>
+      {who}
+      <h2 className="text-lg font-black text-white mb-1">📦 Older data found</h2>
+      <p className="text-sm text-slate-300 mb-3">This device has data saved before email sign-in. Type its old password to move it into <b>{Acct.hint}</b>, or start a new, empty history.</p>
+      <PwInput autoFocus placeholder="Old password" value={a} onChange={e => setA(e.target.value)} onKeyDown={e => e.key === "Enter" && adopt()} />
+      {err && <p className="text-sm text-red-300 mt-2">{err}</p>}
+      <button disabled={busy || !a} onClick={adopt} className="w-full mt-3 py-3 rounded-xl bg-cyan-500 text-slate-950 font-black disabled:opacity-40">{busy ? "Moving…" : "Move my old data here"}</button>
+      <button onClick={() => { setA(""); setErr(""); setPhase("setup"); }} className="w-full mt-2 py-2.5 rounded-xl bg-white/10 font-bold text-sm">Start a new history instead</button>
+    </GateShell>
+  );
   if (phase === "setup") return (
     <GateShell>
-      <h2 className="text-lg font-black text-white mb-1">🔒 Create your password</h2>
-      <p className="text-sm text-slate-300 mb-3">Your classes, learner lists and results on this device will be <b>encrypted</b> with this password. Each teacher sets their own password on their own device.{hasAdmin ? " The school admin's master password can also open it if you forget yours." : ""}</p>
+      {who}
+      <h2 className="text-lg font-black text-white mb-1">🔒 Make your device password</h2>
+      <p className="text-sm text-slate-300 mb-3">First time for this email on this device, so a <b>new, empty history</b> starts here. Your classes, learner lists, results and sheet images will be <b>encrypted</b> with this password. <b className="text-amber-200">Make a NEW password; don't reuse your email password.</b>{hasAdmin ? " The school admin's master password can also open it if you forget yours." : ""}</p>
       <div className="space-y-2">
         <PwInput placeholder="New password (8+ characters)" value={a} onChange={e => setA(e.target.value)} />
         <PwInput placeholder="Type it again" value={b} onChange={e => setB(e.target.value)} onKeyDown={e => e.key === "Enter" && create()} />
@@ -1331,11 +1493,12 @@ function Gate({ children }) {
   // locked
   return (
     <GateShell>
+      {Acct.id && who}
       <div className="flex gap-1 bg-slate-900/60 rounded-xl p-1 mb-3 text-xs">
         {[["password", "Password"], ["recovery", "Recovery code"], ...(hasAdmin ? [["admin", "Admin"]] : [])].map(([k, l]) =>
           <button key={k} onClick={() => { setMode(k); setA(""); setErr(""); }} className={`flex-1 py-2 rounded-lg ${mode === k ? "bg-cyan-500 text-slate-950 font-bold" : "text-slate-300"}`}>{l}</button>)}
       </div>
-      {mode === "password" && <PwInput autoFocus placeholder="Password" value={a} onChange={e => setA(e.target.value)} onKeyDown={e => e.key === "Enter" && unlock()} />}
+      {mode === "password" && <PwInput autoFocus placeholder="Device password" value={a} onChange={e => setA(e.target.value)} onKeyDown={e => e.key === "Enter" && unlock()} />}
       {mode === "admin" && <><p className="text-xs text-slate-400 mb-2">For the school admin only.</p><PwInput autoFocus placeholder="Admin master password" value={a} onChange={e => setA(e.target.value)} onKeyDown={e => e.key === "Enter" && unlock()} /></>}
       {mode === "recovery" && <><p className="text-xs text-slate-400 mb-2">Type your 12 words with spaces between them.</p>
         <textarea autoFocus value={a} onChange={e => setA(e.target.value)} rows={3} className="w-full bg-slate-900/70 border border-white/10 rounded-lg px-3 py-2 text-slate-100 font-mono text-sm outline-none focus:ring-2 focus:ring-cyan-400" /></>}
@@ -1343,8 +1506,8 @@ function Gate({ children }) {
       <button disabled={busy || !a} onClick={unlock} className="w-full mt-4 py-3 rounded-xl bg-cyan-500 text-slate-950 font-black disabled:opacity-40">{busy ? "Unlocking…" : "🔓 Unlock"}</button>
       <details className="mt-4 text-xs text-slate-500">
         <summary className="cursor-pointer">Forgot everything?</summary>
-        <p className="mt-2">Without your password, your recovery code or the admin, the data on this device can't be opened. You can erase it and start fresh.</p>
-        <button onClick={async () => { if (window.__eraseArmed) { await imgStore.wipe(); Vault.erase(); window.location.reload(); } else { window.__eraseArmed = true; setErr("Tap 'Erase this device' again to confirm. Everything on this device will be deleted."); } }} className="mt-2 px-3 py-1.5 rounded-lg bg-red-600/80 text-white font-bold">Erase this device</button>
+        <p className="mt-2">Without your password, your recovery code or the admin, this email's data on this device can't be opened. You can erase it and start fresh. Other emails on this device are not touched.</p>
+        <button onClick={async () => { if (window.__eraseArmed) { await imgStore.wipe(); Vault.erase(); window.location.reload(); } else { window.__eraseArmed = true; setErr("Tap 'Erase' again to confirm. Everything for " + (Acct.hint || "this device") + " on this device will be deleted."); } }} className="mt-2 px-3 py-1.5 rounded-lg bg-red-600/80 text-white font-bold">Erase {Acct.hint || "this device"}</button>
       </details>
     </GateShell>
   );
@@ -1361,7 +1524,7 @@ function SecurityCard({ flash, saveFile }) {
     const p = pwProblem(p1, p2); if (p) return setMsg(p);
     setBusy(true); setMsg("");
     try {
-      if (Vault.unlockedBy === "password") { const v = JSON.parse(localStorage.getItem(VAULT_KEY)); await unwrapWithSecret(v.wraps.pw, cur); }   // check current password
+      if (Vault.unlockedBy === "password") { const v = JSON.parse(localStorage.getItem(vaultKey())); await unwrapWithSecret(v.wraps.pw, cur); }   // check current password
       await Vault.setPassword(p1); setCur(""); setP1(""); setP2(""); setMsg("✔ Password changed."); flash("Password changed.");
     } catch (e) { setMsg("Your current password is wrong."); }
     setBusy(false);
@@ -1721,6 +1884,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
   const deleteHist = async id => { const h = history.filter(x => x.id !== id); setHistory(h); await store.set("history", h); };
 
   const [resetBusy, setResetBusy] = useState(false);
+  const [humanOk, setHumanOk] = useState("");   // Cloudflare Turnstile token for RESET ALL
   const [blankPages, setBlankPages] = useState(1);
   const [blankBusy, setBlankBusy] = useState("");
   const resetAll = async () => {
@@ -1729,7 +1893,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
     let ok = true;
     for (const k of keys) { if (!(await store.set(k, null))) ok = false; }
     await imgStore.wipe();
-    if (!store.db) { Vault.erase(); window.location.reload(); return; }   // website: back to "create password"
+    if (!store.db) { Vault.erase(); window.location.reload(); return; }   // website: this email's data is gone; sign in again = new history
     try { Object.keys(localStorage).filter(k => k.startsWith("jordynai_")).forEach(k => localStorage.removeItem(k)); } catch (e) {}
     setProfile(DEFAULT_PROFILE); setConfig(DEFAULT_CONFIG); setKey(Array(50).fill("A")); setKeySaved(false);
     setClasses([]); setRosters({}); setHistory([]); setPassMark(70); setStudents([]); setRawText("");
@@ -2032,7 +2196,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
               </div>))}</div>}
           <div className="mt-8 pt-5 border-t border-red-500/30 text-center">
             <p className="text-xs text-red-300/80 mb-2">Danger zone: this erases your profile, classes, learner lists, answer key and History.</p>
-            <button onClick={() => setModal("resetAll")} className="px-6 py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black tracking-wide shadow-[0_4px_0_#7f1d1d]">⚠️ RESET ALL DATA</button>
+            <button onClick={() => { setHumanOk(""); setModal("resetAll"); }} className="px-6 py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black tracking-wide shadow-[0_4px_0_#7f1d1d]">⚠️ RESET ALL DATA</button>
           </div>
         </Card>}
         </>}
@@ -2104,9 +2268,11 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
           <h3 className="text-xl font-black text-red-300 mb-2">Reset ALL data?</h3>
           <p className="text-sm text-slate-300 mb-1">This will <b>completely erase</b> everything you encoded and saved:</p>
           <p className="text-xs text-slate-400 mb-4">school profile · {classes.length} saved class(es) and their learner lists · answer key and exam settings · {history.length} finalized session(s) in History</p>
-          <p className="text-xs text-amber-200 mb-4">This cannot be undone. Download the CSVs you need from History first.</p>
+          <p className="text-xs text-amber-200 mb-1">This cannot be undone. Download the CSVs you need from History first.</p>
+          {!store.db && Acct.hint && <p className="text-xs text-slate-400">Only <b>{Acct.hint}</b> on this device is erased. Other emails stay.</p>}
+          {!store.db && <HumanCheck onPass={setHumanOk} />}
           <div className="flex gap-3">
-            <button disabled={resetBusy} onClick={resetAll} className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold disabled:opacity-50">{resetBusy ? "Erasing…" : "Yes, erase everything"}</button>
+            <button disabled={resetBusy || (!store.db && !humanOk)} onClick={resetAll} className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold disabled:opacity-50">{resetBusy ? "Erasing…" : "Yes, erase everything"}</button>
             <button disabled={resetBusy} onClick={() => { setModal(null); setTab("setup"); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="flex-1 py-2.5 rounded-xl bg-white/10 font-bold">Cancel</button>
           </div>
         </div>

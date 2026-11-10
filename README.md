@@ -9,6 +9,7 @@ A free DepEd exam checker for public high school teachers in the Philippines. It
 - **Class lists:** paste learners from the class record (Boys B-1…B-50, Girls G-1…G-50), with an A–Z check by last name.
 - **Answer sheets:** 4 per A4 portrait, as PDF or Word. Named sheets with a CODE and a dot code; blank extra sheets for late enrollees.
 - **Free, fast scanner:** a live camera that captures by itself (about 1 second per sheet, auto flashlight on Android), or photos. Sheets are read **on the device**: no AI, no cost, works offline, photos never leave the phone.
+- **Sign in with Google:** each teacher signs in with their own Google account (Google checks the password; this site never sees it). Each email has its own encrypted history on each device; the same email on a new device starts fresh. RESET ALL asks for Cloudflare's "Verify you are human" check.
 - **Saved sheet images:** each learner's scanned sheet and written name are saved (encrypted) per Grade & Section and exam; view them in the Gradesheet, or download a ZIP with folders (laptop: save straight into a folder).
 - **Reports:** Gradesheet (Boys / Girls), Item Analysis (Frequency of Errors, Critical items above 50%), SMEA summary, MAPEH per-component MPS, CSV export.
 - **DepEd Order No. 15, s. 2026:** pass mark 70%, ST1 / ST2 / TE per term, Exams Component (raw points and 30/30/40 weights), item-count warnings.
@@ -25,3 +26,6 @@ A free DepEd exam checker for public high school teachers in the Philippines. It
 | `assets/` | Logo |
 
 Owner: Joven R. Castro, Teacher II (MAPEH), Leon Garcia Sr. National High School, Davao City.
+
+## Who can change this website
+Only the owner's GitHub account (joobin-1215). Teachers who use the site can't change it.
