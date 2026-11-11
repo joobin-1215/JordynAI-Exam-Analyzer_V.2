@@ -86,5 +86,9 @@ Android: Credential Manager "Sign in with Google" using the EXISTING Firebase/OA
 ## T18. Names on sheets + Print Extra Sheets + Google-only sign-in (SPEC 7.4)
 Android: print learner names on named sheets; "Print Extra Sheets" with 4 learner pickers → 1 A4 page (PDF/Word); Google sign-in only (Credential Manager), per-email database keyed to the Android Keystore (no password). Do not change the package name, SHA-1 or Firebase project.
 
+## T19. Port the real-photo scanner fix + guided scan flow (SPEC 7.5)
+Port squareness-ranked corner candidates, the 4-blob combination search with its shape rules, centrality pick, row-local black thresholds, glare/blank flagging and sure-or-null CODE dots; guided order, check/X with sound and name strip, duplicate block, Mark absent, Take a break, Finalize button + short loading. reference/web-app-reference.html is the source of truth.
+**Checks:** the owner's real photos and the 23-condition stress set: 0 wrong answers, 0 wrong codes.
+
 ---
 When all tasks are done, tell the owner, and ask Claude to update `SPEC.md` / `DECISIONS.md` if anything had to differ.

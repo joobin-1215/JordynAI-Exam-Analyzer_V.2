@@ -2,7 +2,12 @@
 
 Decisions by Joven R. Castro, recorded by Claude. Each one overrides any older plan or code.
 
+## 2026-11-11
+- First real-paper test: 1 of 20 saved. Scanner fixed for cluttered desks, tilt and glare (SPEC 7.5). Guided scan flow adopted: suggested order (any code accepted), Mark absent, short honest loading, full names stay on the device; reports show the written-name strip.
+
 ## 2026-11-10
+- Random Cloudflare human checks while using the website (5–15 min, then every 20–45 min; never during scanning).
+- Google Web Client ID set for the website (origin https://joobin-1215.github.io). It is a separate client; the Android OAuth client and its SHA-1 are unchanged.
 - **Google sign-in replaces passwords** (device-bound key, 24 h offline grace); **learner names printed on named sheets**; **Print Extra Sheets** (4 learners = 1 A4).
 - **Sign in with Google; one encrypted history per email per device; Cloudflare human check before RESET ALL.** The app must never ask for email passwords (phishing risk). Only joobin-1215 may change the code.
 - **Scanner speed + flashlight; Name line back; saved sheet images** (name strip + whole sheet, on the device, encrypted) organized by Grade & Section → Exam, with ZIP (phones) and direct folder saving (laptops); lighter row stripes.

@@ -6,7 +6,7 @@
 <title>JordynAI Exam Analyzer</title>
 <script>
 /* Public settings (safe to publish). googleClientId = the WEB Client ID from Google Cloud; turnstileSiteKey = the Cloudflare Turnstile SITE key (never the secret key). */
-window.JORDYNAI_CONFIG = { googleClientId: "", turnstileSiteKey: "" };
+window.JORDYNAI_CONFIG = { googleClientId: "310597677906-q5k4tluracju2ifu2c4j027s8su9rc0i.apps.googleusercontent.com", turnstileSiteKey: "0x4AAAAAAF7PCpqxoaHfnQik" };
 </script>
 <script src="https://cdn.tailwindcss.com"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -28,6 +28,7 @@ window.JORDYNAI_CONFIG = { googleClientId: "", turnstileSiteKey: "" };
   @keyframes shake { 0%,100% { transform: translateX(0) } 25% { transform: translateX(-5px) } 75% { transform: translateX(5px) } }
   .shake { animation: shake .25s 2; }
   @keyframes scan { 0% { top: 8% } 100% { top: 88% } }
+  @keyframes genbar { from { width: 0 } to { width: 100% } }
   .scanline { position: absolute; animation: scan 2.2s ease-in-out infinite alternate; }
 </style>
 </head>
@@ -318,24 +319,35 @@ function toGray(src, maxDim) {
   for (let i = 0; i < W * H; i++) g[i] = (px[i * 4] * 0.3 + px[i * 4 + 1] * 0.59 + px[i * 4 + 2] * 0.11) | 0;
   return { g, W, H, k };
 }
-/* Coarse corner search on a small image: dark, solid, square blobs at the 4 extremes. */
-function coarseCorners(G) {
+/* Coarse corner search on a small image: dark, solid, square blobs. The sheet may be
+   photographed in ANY rotation (upside down, sideways) and other sheets may be in frame:
+   locateSheet tries every orientation and blob combination and keeps the one whose
+   bubble-ring pattern actually matches the printed layout. */
+function coarseCorners(G) {                       // quick check used by the live camera tick
+  const c = cornerCandidates(G);
+  return c && c.roles ? { pts: c.roles.map(b => ({ x: b.x, y: b.y })), thr: c.thr } : null;
+}
+function cornerCandidates(G) {
   let sum = 0; for (let i = 0; i < G.W * G.H; i++) sum += G.g[i];
   const mean = sum / (G.W * G.H);
-  for (const f of [0.5, 0.62, 0.38, 0.75]) {           // try several darkness levels: works in bright AND dim rooms
-    const r = coarseCornersAt(G, Math.min(f >= 0.62 ? 125 : 100, mean * f));
-    if (r) return r;
+  let loose = null;
+  for (const f of [0.5, 0.62, 0.38, 0.75]) {       // several darkness levels: bright AND dim rooms
+    const thr = Math.min(f >= 0.62 ? 125 : 100, mean * f);
+    const blobs = blobsAt(G, thr);
+    const roles = rolesFromExtremes(G, blobs);
+    if (roles) return { roles, thr, blobs };
+    if (!loose && blobs.length >= 4) loose = { roles: null, thr, blobs };
   }
-  return null;
+  return loose;
 }
-function coarseCornersAt(G, thr) {
+function blobsAt(G, thr) {
   const { g, W, H } = G;
   const seen = new Uint8Array(W * H), blobs = [], area = W * H;
   for (let i = 0; i < W * H; i++) {
     if (seen[i] || g[i] > thr) continue;
-    let minx = W, maxx = 0, miny = H, maxy = 0, n = 0, sx = 0, sy = 0; const st = [i]; seen[i] = 1;
+    let minx = W, maxx = 0, miny = H, maxy = 0, n = 0, sx = 0, sy = 0; const st = [i], px = []; seen[i] = 1;
     while (st.length) {
-      const j = st.pop(), x = j % W, y = (j / W) | 0; n++; sx += x; sy += y;
+      const j = st.pop(), x = j % W, y = (j / W) | 0; n++; sx += x; sy += y; if (px.length < 6000) px.push(j);
       if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
       if (x > 0 && !seen[j - 1] && g[j - 1] <= thr) { seen[j - 1] = 1; st.push(j - 1); }
       if (x < W - 1 && !seen[j + 1] && g[j + 1] <= thr) { seen[j + 1] = 1; st.push(j + 1); }
@@ -343,20 +355,42 @@ function coarseCornersAt(G, thr) {
       if (y < H - 1 && !seen[j + W] && g[j + W] <= thr) { seen[j + W] = 1; st.push(j + W); }
     }
     const bw = maxx - minx + 1, bh = maxy - miny + 1;
-    if (n > area * 0.00008 && n < area * 0.02 && bw / bh > 0.6 && bw / bh < 1.65 && n / (bw * bh) > 0.62) blobs.push({ x: sx / n, y: sy / n, n });
+    if (n > area * 0.00008 && n < area * 0.02 && bw / bh > 0.6 && bw / bh < 1.65 && n / (bw * bh) > 0.62) {
+      // squareness: farthest pixel from the centre / sqrt(area). Square = 0.71, circle (shaded bubble) = 0.56
+      const cx = sx / n, cy = sy / n; let md = 0;
+      for (const j of px) { const d = (j % W - cx) ** 2 + (((j / W) | 0) - cy) ** 2; if (d > md) md = d; }
+      blobs.push({ x: cx, y: cy, n, fill: n / (bw * bh), sq: Math.sqrt(md) / Math.sqrt(n) });
+    }
   }
-  if (blobs.length < 4) return null;
-  const pick = f => blobs.reduce((a, b) => (f(b) > f(a) ? b : a));
+  // corner squares first, round shaded bubbles last (they look alike to a simple dark-blob search)
+  blobs.sort((a, b) => Math.abs(a.sq - 0.72) - Math.abs(b.sq - 0.72));
+  return blobs;
+}
+/* Assign 4 blobs to image-position roles [tl, tr, bl, br]; null if they can't be a sheet. */
+function rolesOf(blobs4) {
+  const pick = f => blobs4.reduce((a, b) => (f(b) > f(a) ? b : a));
   const tl = pick(b => -(b.x + b.y)), br = pick(b => b.x + b.y), tr = pick(b => b.x - b.y), bl = pick(b => b.y - b.x);
   const pts = [tl, tr, bl, br];
   if (new Set(pts).size < 4) return null;
-  const sizes = pts.map(p => p.n), smin = Math.min(...sizes), smax = Math.max(...sizes);
-  if (smax > smin * 4) return null;                                  // the 4 squares should be about the same size
+  const sizes = pts.map(p => p.n);
+  if (Math.max(...sizes) > Math.min(...sizes) * 6) return null;      // the 4 squares are about the same size (near ones look bigger when tilted)
+  return pts;
+}
+/* Geometry test: the quad must have the sheet's shape, upright OR lying sideways. */
+function quadShape(G, pts) {
+  const [tl, tr, bl, br] = pts;
   const wTop = Math.hypot(tr.x - tl.x, tr.y - tl.y), wBot = Math.hypot(br.x - bl.x, br.y - bl.y);
   const hL = Math.hypot(bl.x - tl.x, bl.y - tl.y), hR = Math.hypot(br.x - tr.x, br.y - tr.y);
   const ratio = (hL + hR) / (wTop + wBot);                            // (142-6.5)/(98.5-6.5) = 1.473
-  if (ratio < 1.2 || ratio > 1.8 || wTop < W * 0.12) return null;
-  return { pts: pts.map(p => ({ x: p.x, y: p.y })), thr };
+  const portrait = ratio >= 1.12 && ratio <= 2.15, landscape = ratio >= 1 / 2.15 && ratio <= 1 / 1.12;   // wide range: phone held at an angle
+  if (!portrait && !landscape) return null;
+  if (Math.max((wTop + wBot) / 2, (hL + hR) / 2) < Math.min(G.W, G.H) * 0.17) return null;
+  return { portrait, geom: Math.abs(Math.log((portrait ? ratio : 1 / ratio) / 1.473)) };
+}
+function rolesFromExtremes(G, blobs) {
+  if (blobs.length < 4) return null;
+  const roles = rolesOf(blobs);
+  return roles && quadShape(G, roles) ? roles : null;
 }
 /* Precise centers on a bigger image: flood-fill the dark square nearest each coarse guess. */
 function refineCorners(G, guess, thr) {
@@ -395,13 +429,109 @@ function homography(src, dst) {
 }
 const CORNER_MM = GEO.corners.map(([x, y]) => [x + GEO.cornerSize / 2, y + GEO.cornerSize / 2]);
 
-/* Locate the sheet in an image: returns { G, map: mm -> pixel } or null */
-function locateSheet(src) {
-  const small = toGray(src, 520), coarse = coarseCorners(small);
-  if (!coarse) return null;
-  const G = toGray(src, 2200), s = G.k / small.k;
-  const pts = refineCorners(G, coarse.pts.map(p => ({ x: p.x * s, y: p.y * s })), coarse.thr + 10);
-  return { G, pts, map: homography(CORNER_MM, pts.map(p => [p.x, p.y])) };
+/* Bubble-ring score for a candidate mapping: how well the printed bubble outlines line up.
+   Samples a band of radii per angle so slightly-off scale or thin print still counts. */
+function ringScoreAt(G, map, n, paper, rowStep) {
+  const { L, centers } = bubbleCenters(n), r = L.b / 2;
+  let dark = 0, tot = 0;
+  for (let qi = 0; qi < centers.length; qi += rowStep) {
+    for (const [cx, cy] of centers[qi]) for (let a = 0; a < 16; a++) {
+      const ca = Math.cos(a / 8 * Math.PI), sa = Math.sin(a / 8 * Math.PI);
+      let best = 255;
+      for (const rr of [r * 0.85, r, r * 1.15]) { const [x, y] = map(cx + ca * rr, cy + sa * rr); const v = lum(G, x, y); if (v < best) best = v; }
+      tot++; if (best < paper * 0.72) dark++;
+    }
+  }
+  return dark / tot;
+}
+/* Between-bubble gaps must be bright paper: random junk and misaligned maps fail this. */
+function gapScoreAt(G, map, n, paper, rowStep) {
+  const { centers } = bubbleCenters(n);
+  let bright = 0, tot = 0;
+  for (let qi = 0; qi < centers.length; qi += rowStep) {
+    const row = centers[qi], cy = row[0][1];
+    for (let i = 0; i < 3; i++) { const [x, y] = map((row[i][0] + row[i + 1][0]) / 2, cy); tot++; if (lum(G, x, y) > paper * 0.75) bright++; }
+  }
+  return tot ? bright / tot : 0;
+}
+/* Locate the sheet: try every orientation (and, in cluttered photos, other corner
+   combinations), keep the mapping whose bubble grid truly matches. Returns
+   { G, pts, map, paper, score } or null. */
+function locateSheet(src, n) {
+  const small = toGray(src, 520), cand = cornerCandidates(small);
+  if (!cand) return null;
+  const G = toGray(src, 2200), k = G.k / small.k;
+  const permsOf = shape => (shape.portrait ? [[0, 1, 2, 3], [3, 2, 1, 0]] : [[1, 3, 0, 2], [2, 0, 3, 1]]); // upright/180 or the two sideways
+  const paperAt = map => { const probes = GEO.paperProbe.map(([x, y]) => patchMedian(G, map, x, y, 0.6)).sort((a, b) => a - b); return probes[(probes.length / 2) | 0]; };
+  // full check with refined corners
+  const tryRoles = roles => {
+    const shape = quadShape(small, roles); if (!shape) return null;
+    const pts = refineCorners(G, roles.map(p => ({ x: p.x * k, y: p.y * k })), cand.thr + 10);
+    let best = null;
+    for (const pm of permsOf(shape)) {
+      const ordered = pm.map(i => pts[i]);
+      const map = homography(CORNER_MM, ordered.map(p => [p.x, p.y]));
+      const paper = paperAt(map);
+      if (paper < 60) continue;                                       // mapped onto something dark: not this way up
+      const ring = ringScoreAt(G, map, n, paper, 3), gap = gapScoreAt(G, map, n, paper, 3);
+      const score = ring * 0.75 + gap * 0.25;
+      if (!best || score > best.score) best = { G, pts: ordered, map, paper, score, ring, gap };
+    }
+    return best;
+  };
+  // rough bubble-ring score with unrefined corners, used to rank many candidates fast
+  const quick = roles => {
+    const shape = quadShape(small, roles); if (!shape) return -1;
+    const { L, centers } = bubbleCenters(n), r = L.b / 2; let bestQ = -1;
+    for (const pm of permsOf(shape)) {
+      const map = homography(CORNER_MM, pm.map(i => [roles[i].x * k, roles[i].y * k]));
+      const paper = patchMedian(G, map, GEO.paperProbe[0][0], GEO.paperProbe[0][1], 0.6);
+      if (paper < 60) continue;
+      let dark = 0, tot = 0;
+      for (let qi = 0; qi < centers.length; qi += 4) for (const [cx, cy] of centers[qi]) for (let a = 0; a < 8; a++) {
+        const ca = Math.cos(a / 4 * Math.PI), sa = Math.sin(a / 4 * Math.PI);
+        let bb = 255; for (const rr of [r * 0.85, r, r * 1.15]) { const [x, y] = map(cx + ca * rr, cy + sa * rr); const v = lum(G, x, y); if (v < bb) bb = v; }
+        tot++; if (bb < paper * 0.72) dark++;
+      }
+      bestQ = Math.max(bestQ, dark / tot);
+    }
+    return bestQ;
+  };
+  // a believable sheet outline: convex, opposite edges roughly parallel (camera tilt allowed), corners similar size
+  const quadOk = q => {
+    const [tl, tr, bl, br] = q, ring = [tl, tr, br, bl];
+    let sgn = 0;
+    for (let i = 0; i < 4; i++) {
+      const a = ring[i], b = ring[(i + 1) % 4], c = ring[(i + 2) % 4];
+      const cr = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+      if (!sgn) sgn = Math.sign(cr); else if (Math.sign(cr) !== sgn) return false;
+    }
+    const ang = (u, v) => { const d = Math.abs(Math.atan2(u.y, u.x) - Math.atan2(v.y, v.x)) % (2 * Math.PI); return Math.min(d, 2 * Math.PI - d); };
+    const V = (a, b) => ({ x: b.x - a.x, y: b.y - a.y });
+    if (ang(V(tl, tr), V(bl, br)) > 0.6 || ang(V(tl, bl), V(tr, br)) > 0.6) return false;
+    const sz = q.map(p => p.n); return Math.max(...sz) <= Math.min(...sz) * 6;
+  };
+  const list = [], keys = new Set();
+  const add = roles => { const key = roles.map(p => (p.x | 0) + "," + (p.y | 0)).join("|"); if (!keys.has(key)) { keys.add(key); list.push(roles); } };
+  if (cand.roles) add(cand.roles);
+  // every set of 4 square-looking blobs is a possible sheet (handles other sheets in the photo, strong tilt, shaded bubbles)
+  const pool = cand.blobs.filter(b => b.sq > 0.6).slice(0, 18);
+  for (let a = 0; a < pool.length; a++) for (let b = a + 1; b < pool.length; b++) for (let c = b + 1; c < pool.length; c++) for (let d = c + 1; d < pool.length; d++) {
+    const roles = rolesOf([pool[a], pool[b], pool[c], pool[d]]);
+    if (roles && quadOk(roles) && quadShape(small, roles)) add(roles);
+  }
+  const ranked = list.map(r => ({ r, q: quick(r) })).filter(x => x.q >= 0.25).sort((x, y) => y.q - x.q).slice(0, 10);
+  const centrality = r => Math.hypot(r.pts.reduce((t, p) => t + p.x, 0) / 4 / G.W - 0.5, r.pts.reduce((t, p) => t + p.y, 0) / 4 / G.H - 0.5);
+  const good = []; let best = null;
+  for (const { r } of ranked) {
+    const res = tryRoles(r); if (!res) continue;
+    if (res.ring >= 0.5) good.push(res);
+    if (!best || res.score > best.score) best = res;
+    if (good.length >= 4) break;
+  }
+  // several sheets in view: the one nearest the middle of the photo is the one being scanned
+  if (good.length) best = good.reduce((a, b) => (b.score - centrality(b) * 0.6 > a.score - centrality(a) * 0.6 ? b : a));
+  return best && best.score >= 0.18 ? best : null;
 }
 function lum(G, x, y) { const xi = Math.round(x), yi = Math.round(y); if (xi < 0 || yi < 0 || xi >= G.W || yi >= G.H) return 255; return G.g[yi * G.W + xi]; }
 function patchMedian(G, map, xmm, ymm, rmm) {
@@ -424,38 +554,63 @@ function darknessOf(G, map, cx, cy, r, white) {
   for (let i = -3; i <= 3; i++) for (let j = -3; j <= 3; j++) { const dx = i / 3 * r, dy = j / 3 * r; if (dx * dx + dy * dy > r * r) continue; const [x, y] = map(cx + dx, cy + dy); sum += lum(G, x, y); tot++; }
   return Math.max(0, 1 - sum / tot / white);
 }
+/* Darkest printed ink near a point (low percentile of a small grid): the local "black" under the same light. */
+function inkLevel(G, map, x0, x1, cy, h) {
+  const v = [];
+  for (let i = 0; i <= 16; i++) for (let j = -4; j <= 4; j++) { const [x, y] = map(x0 + (x1 - x0) * i / 16, cy + j / 4 * h); v.push(lum(G, x, y)); }
+  v.sort((a, b) => a - b); return (v[1] + v[2] + v[3]) / 3;                 // thin digit strokes: a few darkest samples
+}
 /* Read a whole sheet. n = items on the sheet. */
 function readSheet(src, n) {
-  const loc = locateSheet(src);
+  const loc = locateSheet(src, n);
   if (!loc) return { ok: false, reason: "corners" };
-  const { G, map } = loc;
-  const probes = GEO.paperProbe.map(([x, y]) => patchMedian(G, map, x, y, 0.6)).sort((a, b) => a - b);
-  const paper = probes[Math.floor(probes.length / 2)];
+  const { G, map, paper } = loc;
   const cornerInk = CORNER_MM.map(([x, y]) => patchMedian(G, map, x, y, 0.8));
   if (cornerInk.some(v => v > paper * 0.6)) return { ok: false, reason: "corners" };
   const { L, centers } = bubbleCenters(n), r = L.b / 2;
-  // layout check: printed bubble outlines must be where we expect them
-  let ringDark = 0, ringTot = 0;
-  centers.forEach(row => row.forEach(([cx, cy]) => { for (let a = 0; a < 16; a++) { const [x, y] = map(cx + Math.cos(a / 8 * Math.PI) * r, cy + Math.sin(a / 8 * Math.PI) * r); ringTot++; if (lum(G, x, y) < paper * 0.72) ringDark++; } }));
-  const ringScore = ringDark / ringTot;
+  // layout check: printed bubble outlines must be where we expect them (every row, banded radii)
+  const ringScore = ringScoreAt(G, map, n, paper, 1), gapScore = gapScoreAt(G, map, n, paper, 1);
+  if (ringScore < 0.22 && gapScore < 0.45) return { ok: false, reason: "corners" };            // not a sheet at all
+  let altRing = 0;                                      // was this sheet printed for a DIFFERENT item count?
+  if (ringScore < 0.75) for (const n2 of [10, 15, 20, 25, 30, 40, 45, 50, 60, 75, 100]) {
+    if (n2 === n) continue;
+    const r2 = ringScoreAt(G, map, n2, paper, 3); if (r2 > altRing) altRing = r2;
+  }
   const answers = [], flagged = [], fills = [];
+  const { noW } = bubbleCenters(n);
   centers.forEach((row, qi) => {
     const cy = row[0][1], above = cy - (r + (L.rowH / 2 - r) / 2), below = cy + (r + (L.rowH / 2 - r) / 2);
     const white = Math.max(patchMedian(G, map, row[1][0], above, 0.3), patchMedian(G, map, row[2][0], below, 0.3), paper * 0.8);
-    const thr = white * 0.6;
+    // local black = the printed item number beside this row. Glare or shadow lifts both together,
+    // so the shading threshold sits halfway between them instead of at a fixed share of white.
+    const nx1 = row[0][0] - r - 0.9, ink = Math.min(inkLevel(G, map, nx1 - noW + 1.6, nx1, cy, Math.min(1.6, r * 0.5)), white - 1);
+    const contrast = white - ink;
+    if (contrast < 28) { fills.push([0, 0, 0, 0]); answers.push(null); flagged.push(qi + 1); return; }   // washed out (glare): check by eye
+    const thr = Math.min(white * 0.75, ink + contrast * 0.5);
     const f = row.map(([cx]) => fillOf(G, map, cx, cy, r * 0.62, thr));
     fills.push(f);
     const order = [0, 1, 2, 3].sort((a, b) => f[b] - f[a]), top = f[order[0]], second = f[order[1]];
-    const deep = top >= 0.42 ? darknessOf(G, map, row[order[0]][0], cy, r * 0.55, white) : 0;
-    if (top >= 0.42 && second < 0.3 && deep >= 0.4) answers.push("ABCD"[order[0]]);
-    else if (top < 0.22) answers.push(null);                                     // blank
+    // darkness relative to this row's black-to-white range (old rule: 1 - mean/white >= 0.4)
+    const deep = top >= 0.42 ? Math.min(1, darknessOf(G, map, row[order[0]][0], cy, r * 0.55, white) * white / contrast) : 0;
+    if (top >= 0.42 && second < 0.3 && deep >= 0.45) answers.push("ABCD"[order[0]]);
+    else if (top < 0.22) {
+      // looks blank: but if one bubble is clearly darker than the other three (light pencil, glare), ask the teacher
+      const d = row.map(([cx]) => darknessOf(G, map, cx, cy, r * 0.55, white) * white / contrast).sort((a, b) => b - a);
+      answers.push(null); if (d[0] - d[1] > 0.16) flagged.push(qi + 1);
+    }
     else { answers.push(null); flagged.push(qi + 1); }                           // double, light or erased
   });
   // CODE dots
   const D = GEO.dots, codeBoxPaper = Math.max(patchMedian(G, map, GEO.codeBox.x + GEO.codeBox.w / 2, GEO.codeBox.y + 5.2, 0.4), paper * 0.8);
-  const bits = Array.from({ length: D.count }, (_, i) => (fillOf(G, map, D.x0 + i * D.step + D.size / 2, D.y + D.size / 2, D.size * 0.3, codeBoxPaper * 0.55) > 0.5 ? 1 : 0));
-  const code = bitsToCode(bits);
-  return { ok: true, answers, flagged, fills, code, bits, ringScore, layoutOk: ringScore > 0.35, paper, map, G, pts: loc.pts };
+  // the first dot is ALWAYS printed black: use it as this spot's black, threshold halfway to the paper
+  const dotAt = i => [D.x0 + i * D.step + D.size / 2, D.y + D.size / 2];
+  const dotInk = patchMedian(G, map, ...dotAt(0), D.size * 0.2);
+  const dotThr = Math.max(codeBoxPaper * 0.55, dotInk + (codeBoxPaper - dotInk) * 0.5);
+  const dotFill = Array.from({ length: D.count }, (_, i) => fillOf(G, map, ...dotAt(i), D.size * 0.3, dotThr));
+  const bits = dotFill.map(f => (f > 0.5 ? 1 : 0));
+  const codeSure = dotFill.every(f => f < 0.3 || f > 0.7);                   // half-dark dots = unsure: never guess a code
+  const code = codeSure ? bitsToCode(bits) : null;
+  return { ok: true, answers, flagged, fills, code, codeSure, bits, ringScore, gapScore, layoutOk: ringScore > 0.3 && gapScore > 0.5 && !(altRing > ringScore * 1.25 && altRing > 0.45), paper, map, G, pts: loc.pts };
 }
 /* Straightened 1050 x 1485 crop (for thumbnails and the Claude backup). */
 function warpCrop(res, ppm = 5, x0 = 0, y0 = 0, x1 = GEO.W, y1 = GEO.H) {
@@ -787,6 +942,35 @@ function ProfileModal({ initial, onSave, onClose }) {
   );
 }
 
+/* ===================== SCAN SOUNDS + BIG CHECK / X ===================== */
+let _ac = null;
+function ensureAC() { try { const C = window.AudioContext || window.webkitAudioContext; if (!_ac && C) _ac = new C(); if (_ac && _ac.state === "suspended") _ac.resume(); } catch (e) {} return _ac; }
+function playBeep() {        // grocery-cashier laser beep
+  const a = ensureAC(); if (!a) return;
+  try { const t = a.currentTime, o = a.createOscillator(), g = a.createGain();
+    o.type = "square"; o.frequency.setValueAtTime(1600, t); o.frequency.exponentialRampToValueAtTime(3100, t + 0.07);
+    g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+    o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + 0.13); } catch (e) {}
+}
+function playBuzz() {
+  const a = ensureAC(); if (!a) return;
+  try { const t = a.currentTime, o = a.createOscillator(), g = a.createGain();
+    o.type = "sawtooth"; o.frequency.setValueAtTime(165, t); o.frequency.linearRampToValueAtTime(115, t + 0.28);
+    g.gain.setValueAtTime(0.14, t); g.gain.linearRampToValueAtTime(0.001, t + 0.32);
+    o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + 0.32); } catch (e) {}
+}
+function ScanFlash({ fx }) {
+  if (!fx) return null;
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 z-[400] flex flex-col items-center justify-center pointer-events-none">
+      <div className={`absolute inset-0 ${fx.ok ? "bg-emerald-600/60" : "bg-red-700/60"}`} />
+      <div className="relative text-8xl drop-shadow-lg">{fx.ok ? "✅" : "❌"}</div>
+      <div className="relative mt-3 text-2xl font-black text-white text-center px-6 drop-shadow">{fx.text}</div>
+      {fx.img ? <img src={fx.img} alt="name written on the sheet" className="relative mt-3 max-w-[88vw] w-[420px] rounded-lg bg-white shadow-xl border-4 border-white" /> : null}
+      {fx.sub ? <div className="relative text-sm text-white/90 mt-2 text-center px-8 max-w-md">{fx.sub}</div> : null}
+    </div>, document.body);
+}
+
 /* ===================== SCANNER ===================== */
 const scanPrompt = n => `You are reading ONE photo of a printed DepEd OMR answer sheet (a quarter of an A4 page, portrait, 105 x 148.5 mm).
 Layout: four black corner squares and a school header. Top right is a box labeled "CODE" with a printed or handwritten learner code such as B-1, B-12, G-3 (B = boy, G = girl), or the words "ANSWER KEY" (the teacher's key sheet). Beside it are printed lines: Exam, Grade & Section, Subject.
@@ -859,6 +1043,7 @@ function fitCorners(img, corners, box) {
 }
 
 function SheetAligner({ file, index, total, onDone, onSkip, onCancel }) {
+  useEffect(() => { window.__jordynBusy = (window.__jordynBusy || 0) + 1; return () => { window.__jordynBusy = Math.max(0, (window.__jordynBusy || 1) - 1); }; }, []);   // random human check waits while scanning
   const [url] = useState(() => URL.createObjectURL(file));
   const [img, setImg] = useState(null);
   const [box, setBox] = useState(frameSize());
@@ -938,6 +1123,7 @@ function SheetAligner({ file, index, total, onDone, onSkip, onCancel }) {
 
 /* ===================== LIVE CAMERA (auto-capture when the 4 corners are steady) ===================== */
 function LiveScanner({ n, onResult, onClose }) {
+  useEffect(() => { window.__jordynBusy = (window.__jordynBusy || 0) + 1; return () => { window.__jordynBusy = Math.max(0, (window.__jordynBusy || 1) - 1); }; }, []);   // random human check waits while scanning
   const videoRef = useRef(null), streamRef = useRef(null);
   const [status, setStatus] = useState("Starting camera…");
   const [err, setErr] = useState("");
@@ -991,7 +1177,12 @@ function LiveScanner({ n, onResult, onClose }) {
 
   const tick = () => {
     const v = videoRef.current, st = state.current; if (!v || !v.videoWidth) return;
-    const small = toGray(v, 400), cc = coarseCorners(small);
+    const small = toGray(v, 400); let cc = coarseCorners(small);
+    if (!cc && Date.now() - (st.lastFull || 0) > 450) {          // other sheets or strong tilt in view: full search, a few times a second
+      st.lastFull = Date.now();
+      const loc = locateSheet(v, n);
+      if (loc && loc.ring >= 0.5) { const f = small.W / loc.G.W; cc = { pts: loc.pts.map(p => ({ x: p.x * f, y: p.y * f })) }; }
+    }
     if (!cc) { st.hist = []; st.gone++; if (st.gone >= 2) { st.needGone = false; st.lastCode = null; } if (Date.now() > st.cooldownUntil) setStatus("Show ONE sheet inside the frame, with all 4 black corners visible."); return; }
     st.gone = 0;
     if (Date.now() < st.cooldownUntil || st.needGone) return;
@@ -1032,7 +1223,14 @@ function LiveScanner({ n, onResult, onClose }) {
 }
 
 /* ===================== SCANNER PANEL ===================== */
-function ScanPanel({ onStudent, onKey, n, hasKey, meta }) {
+function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absent, onAbsent, onUnabsent, gradeSection, onReport }) {
+  const [paused, setPaused] = useState(false);
+  const [fx, setFx] = useState(null); const fxT = useRef(null);
+  const fire = (ok, text, sub, sound = true, img = "") => {
+    if (sound) (ok ? playBeep : playBuzz)();
+    setFx({ ok, text, sub, img }); clearTimeout(fxT.current);
+    fxT.current = setTimeout(() => setFx(null), ok ? (img ? 1400 : 1000) : 1800);
+  };
   const [sample, setSample] = useState(undefined);
   const [imgOK, setImgOK] = useState(false);
   const [items, setItems] = useState([]);   // {id, thumb, status: done|review|align|error, code, answers, flagged, msg, cropBlob, blob}
@@ -1061,27 +1259,40 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta }) {
     }
     const m = c.match(/^([BG])-?(\d{1,2})$/); if (!m) return "Type a code like B-12 or G-3.";
     const id = `${m[1]}-${+m[2]}`, responses = {};
+    if (queue && queue.length && !queue.some(x => x.code === id)) return `${id} is not in ${gradeSection}'s class list. Check the sheet, or update the list in Class Setup.`;
     answers.forEach((a, i) => { responses[i + 1] = a || ""; });
-    onStudent({ student_id: id, student_name: "", responses }); saveImages(id, it); return "";
+    onStudent({ student_id: id, student_name: "", responses }); saveImages(id, it);
+    if (absent && absent.includes(id) && onUnabsent) onUnabsent(id);               // their sheet arrived: not absent after all
+    return "";
   };
 
   const handleResult = async (res, name, blob) => {
     const id = Math.random().toString(36).slice(2);
-    if (!res.ok) { setItems(l => [{ id, status: "align", msg: "Couldn't find the 4 black corners.", blob, name }, ...l]); return; }
+    if (!res.ok) { fire(false, "SCAN UNSUCCESSFUL", "Couldn't see all 4 black corners. Rescan the SAME sheet: whole sheet in view, phone flat above it, good light."); setItems(l => [{ id, status: "align", msg: "Couldn't see all 4 black corners (one may be cut off, covered or in shadow).", blob, name }, ...l]); return; }
     const crop = warpCrop(res, 5), thumb = crop.toDataURL("image/jpeg", 0.6);
     const sheetBlob = await canvasBlob(crop, 0.8);                                   // saved on the device as the learner's reference
-    const nameBlob = await canvasBlob(warpCrop(res, 12, ...NAME_STRIP), 0.85);     // the written name, also device-only
+    const nameC = warpCrop(res, 12, ...NAME_STRIP);                                  // the written name, also device-only
+    const nameBlob = await canvasBlob(nameC, 0.85);
+    const nameThumb = nameC.toDataURL("image/jpeg", 0.7);
     const cc = warpCrop(res, 8), cx = cc.getContext("2d"); cx.fillStyle = "#fff";    // copy for "Ask Claude": name blanked out
     cx.fillRect(NAME_STRIP[0] * 8, NAME_STRIP[1] * 8, (NAME_STRIP[2] - NAME_STRIP[0]) * 8, 6 * 8);
     const cropBlob = await canvasBlob(cc);
-    if (!res.layoutOk) { setItems(l => [{ id, status: "error", thumb, cropBlob, sheetBlob, nameBlob, blob, name, code: res.code || "", answers: Array(n).fill(null), flagged: [], msg: `This sheet doesn't match ${n} items. Was it printed for a different number of items? Reprint, or use Ask Claude.` }, ...l]); return; }
-    const item = { id, thumb, cropBlob, sheetBlob, nameBlob, blob, name, code: res.code || "", answers: res.answers.slice(), flagged: res.flagged.slice() };
+    if (!res.layoutOk) { fire(false, "SCAN UNSUCCESSFUL", `This sheet doesn't match ${n} items. Rescan, or check the Items setting.`); setItems(l => [{ id, status: "error", thumb, cropBlob, sheetBlob, nameBlob, nameThumb, blob, name, code: res.code || "", answers: Array(n).fill(null), flagged: [], msg: `This sheet doesn't match ${n} items. Was it printed for a different number of items? Reprint, or use Ask Claude.` }, ...l]); return; }
+    const item = { id, thumb, cropBlob, sheetBlob, nameBlob, nameThumb, blob, name, code: res.code || "", answers: res.answers.slice(), flagged: res.flagged.slice() };
     const keyBlanks = res.code === "KEY" && res.answers.some(a => !a);
-    if (res.code && !res.flagged.length && !keyBlanks) {
+    const wasDup = res.code && res.code !== "KEY" && scannedIds && scannedIds.has(res.code);
+    if (wasDup) {                                                                  // never overwrite silently
+      fire(false, `${res.code} WAS ALREADY SCANNED`, "Not saved. If this is a fresh rescan of the same learner, tap Save in the list to replace the earlier one.", true, nameThumb);
+      setItems(l => [{ ...item, status: "review", msg: `${res.code} was already scanned. Tap Save only to REPLACE the earlier scan.` }, ...l]);
+    } else if (res.code && !res.flagged.length && !keyBlanks) {
       const e = commit(item, res.code, res.answers);
+      if (!e) { const who = res.code === "KEY" ? "" : ((queue || []).find(q => q.code === res.code) || {}).name || "";
+        fire(true, `${res.code === "KEY" ? "ANSWER KEY" : res.code} SAVED`, who ? `On your list: ${who} — check it matches the name on the sheet.` : "", true, res.code === "KEY" ? "" : nameThumb); }
+      else fire(false, "NOT SAVED", e, true, nameThumb);
       setItems(l => [{ ...item, status: e ? "review" : "done", msg: e }, ...l]);
     } else {
       const why = [!res.code && "no code found: type it", res.flagged.length && `${res.flagged.length} item(s) to check`, keyBlanks && "key has blanks"].filter(Boolean).join(" · ");
+      fire(false, `${res.code || "THIS SHEET"} NEEDS YOUR CHECK`, why + ". It is NOT saved yet — fix it in the list, then tap Save.", true, nameThumb);
       setItems(l => [{ ...item, status: "review", msg: why }, ...l]);
     }
   };
@@ -1106,21 +1317,57 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta }) {
   };
 
   const done = items.filter(i => i.status === "done").length, toReview = items.filter(i => i.status !== "done").length;
+  const Q = queue || [];
+  const next = !hasKey ? { code: "KEY" } : Q.find(q => !(scannedIds && scannedIds.has(q.code)) && !(absent || []).includes(q.code));
+  const doneCount = Q.filter(q => scannedIds && scannedIds.has(q.code)).length;
+  const absRows = Q.filter(q => (absent || []).includes(q.code));
+  const allDone = hasKey && Q.length > 0 && !next;
   return (
     <Card className="border-cyan-400/30">
+      {paused ? <div className="text-center py-10">
+        <div className="text-5xl mb-2">☕</div>
+        <p className="text-xl font-black text-white">On a break</p>
+        <p className="text-sm text-slate-400 mt-1">Scanning is paused{next ? ` at ${next.code === "KEY" ? "the ANSWER KEY" : next.code}` : ""}. Everything scanned so far is already saved.</p>
+        <button onClick={() => setPaused(false)} className="mt-4 px-8 py-3 rounded-xl bg-emerald-500 text-slate-950 font-black text-lg">▶ Resume scanning</button>
+      </div> : <>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
         <h2 className="font-black text-white text-lg">📷 Scanner · free on-device reader</h2>
         <span className="text-xs text-slate-400">{n} items · {hasKey ? "key saved ✔" : "scan or save the KEY first"}</span>
       </div>
       <p className="text-xs text-slate-400 mb-3">Sheets are read on this device in under a second: free, offline and private (photos never leave the phone).{claudeOK ? " Claude is only a backup for unclear sheets." : ""}</p>
       <div className="grid sm:grid-cols-3 gap-2">
-        <button onClick={() => setLive(true)} className="py-3 rounded-xl bg-cyan-500 text-slate-950 font-black">🎥 Live camera (auto)</button>
+        <button onClick={() => { ensureAC(); setLive(true); }} className="py-3 rounded-xl bg-cyan-500 text-slate-950 font-black">🎥 Live camera (auto)</button>
         <label className="py-3 rounded-xl bg-white/10 hover:bg-white/15 font-bold text-center cursor-pointer">📸 Take photo
-          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { Array.from(e.target.files || []).forEach(f => fromFile(f)); e.target.value = ""; }} /></label>
+          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { ensureAC(); Array.from(e.target.files || []).forEach(f => fromFile(f)); e.target.value = ""; }} /></label>
         <label className="py-3 rounded-xl bg-white/10 hover:bg-white/15 font-bold text-center cursor-pointer">🖼️ Choose photos
-          <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={e => { Array.from(e.target.files || []).forEach(f => fromFile(f)); e.target.value = ""; }} /></label>
+          <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={e => { ensureAC(); Array.from(e.target.files || []).forEach(f => fromFile(f)); e.target.value = ""; }} /></label>
       </div>
-      <p className="text-[11px] text-slate-500 mt-2">Tip: scan the ANSWER KEY sheet first. One sheet per photo, flat, good light, all 4 black corners visible.</p>
+      <p className="text-[11px] text-slate-500 mt-2">Tip: scan the ANSWER KEY sheet first. One sheet per photo, flat, good light, all 4 black corners visible. Upside-down or sideways photos are fine — the reader rotates them itself.</p>
+
+      {Q.length > 0 && <div className="rounded-xl border border-cyan-400/40 bg-cyan-500/10 p-3 mt-3">
+        {!allDone ? <>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-[11px] uppercase tracking-widest text-cyan-300 font-bold">🎯 Next answer sheet</p>
+              <p className="text-2xl font-black text-white truncate">{next.code === "KEY" ? "Scan the ANSWER KEY first" : <>Scanning {next.code}</>}</p>
+              {next.code !== "KEY" && <p className="text-xs text-slate-400">{next.code[0] === "B" ? "Boy" : "Girl"}{next.name ? <> · <b className="text-slate-300">{toInitials(next.name)}</b></> : ""} · sheet {doneCount + absRows.length + 1} of {Q.length}. Any learner's sheet is accepted — this is just the suggested order.</p>}
+            </div>
+            <div className="text-right shrink-0">
+              <p className="text-xl font-black text-emerald-300">{doneCount} / {Q.length}</p>
+              <p className="text-[11px] text-slate-400">scanned{absRows.length ? ` · ${absRows.length} absent` : ""}</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {next.code !== "KEY" && <button onClick={() => { onAbsent && onAbsent(next.code); }} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 hover:bg-white/15">🚫 Mark {next.code} absent</button>}
+            <button onClick={() => { setLive(false); setPaused(true); }} className="px-3 py-1.5 text-xs rounded-lg bg-amber-400/20 text-amber-200 hover:bg-amber-400/30">☕ Take a break</button>
+          </div>
+        </> : <>
+          <p className="text-lg font-black text-emerald-300">🎉 100% accounted for — {doneCount} scanned{absRows.length ? `, ${absRows.length} absent` : ""}.</p>
+          <button onClick={() => { ensureAC(); onReport && onReport(); }} className="w-full mt-2 py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-lg shadow-lg">🚀 Finalize and Generate Report on {gradeSection}</button>
+          <p className="text-[11px] text-slate-400 mt-1 text-center">Opens the Gradesheet. To lock it into History, use ✅ Finalize Session in Summary & CSV.</p>
+        </>}
+        {absRows.length > 0 && <p className="text-[11px] text-slate-400 mt-2">Absent (tap to undo): {absRows.map(q => <button key={q.code} onClick={() => onUnabsent && onUnabsent(q.code)} className="underline mr-2 hover:text-white" title="Un-mark absent">{q.code} ✕</button>)}</p>}
+      </div>}
 
       {items.length > 0 && <p className="text-sm text-slate-300 mt-4 mb-2">✔ {done} saved{toReview ? ` · ⚠ ${toReview} need your check` : ""}</p>}
       <div className="space-y-2">
@@ -1128,11 +1375,13 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta }) {
           <div key={it.id} className={`flex gap-3 rounded-xl p-2 border ${it.status === "done" ? "border-emerald-400/30 bg-emerald-500/5" : it.status === "review" ? "border-amber-400/40 bg-amber-500/5" : "border-red-400/40 bg-red-500/5"}`}>
             {it.thumb ? <img src={it.thumb} alt="" className="w-14 rounded bg-white shrink-0 self-start" style={{ aspectRatio: "1/1.414" }} /> : <div className="w-14 shrink-0 rounded bg-slate-800 text-[10px] text-slate-500 flex items-center justify-center" style={{ aspectRatio: "1/1.414" }}>no sheet</div>}
             <div className="flex-1 min-w-0 text-sm">
-              {it.status === "done" && <p className="text-emerald-300 font-bold">✔ {it.code === "KEY" ? "ANSWER KEY saved" : `${it.code} saved`} · {it.answers.filter(Boolean).length}/{n} answered</p>}
+              {it.status === "done" && <><p className="text-emerald-300 font-bold">✔ {it.code === "KEY" ? "ANSWER KEY saved" : `${it.code} saved`} · {it.answers.filter(Boolean).length}/{n} answered</p>
+                {it.nameThumb && it.code !== "KEY" && <img src={it.nameThumb} alt="written name" title="The name written on this sheet" className="mt-1 h-7 max-w-full object-contain rounded bg-white" />}</>}
               {it.status !== "done" && <>
                 <p className={`${it.status === "review" ? "text-amber-200" : "text-red-300"} text-xs mb-1`}>{it.msg}</p>
                 {it.status === "align" && <button onClick={() => setAligning(it)} className="px-3 py-1.5 text-xs rounded-lg bg-cyan-500 text-slate-950 font-bold">Align by hand</button>}
                 {(it.status === "review" || it.status === "error") && <>
+                  {it.nameThumb && <img src={it.nameThumb} alt="written name" title="The name written on this sheet" className="h-7 max-w-full object-contain rounded bg-white mb-1" />}
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-xs text-slate-400">Code</span>
                     <input value={it.code} onChange={e => patch(it.id, { code: up(e.target.value) })} placeholder="B-12" className="w-24 bg-slate-900/70 border border-white/15 rounded px-2 py-1 text-xs font-mono text-white" />
@@ -1153,7 +1402,9 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta }) {
             </div>
           </div>))}
       </div>
-      {live && <LiveScanner n={n} onClose={() => setLive(false)} onResult={res => handleResult(res, "live camera", null)} />}
+      </>}
+      {live && !paused && <LiveScanner n={n} onClose={() => setLive(false)} onResult={res => handleResult(res, "live camera", null)} />}
+      <ScanFlash fx={fx} />
       {aligning && <SheetAligner file={aligning.blob} index={0} total={1}
         onDone={async b => { const it = aligning; setAligning(null); setItems(l => l.filter(x => x.id !== it.id)); fromFile(it.blob, b); }}
         onSkip={() => setAligning(null)} onCancel={() => setAligning(null)} />}
@@ -1279,7 +1530,7 @@ function RosterPage({ label, initial, onSave, onBack, onDownload, onCodeList, fl
           <li>Names must be in <b>alphabetical order by last name</b>, because the order gives each learner a permanent code: 1st boy = <b>B-1</b>, 2nd = <b>B-2</b>… The same goes for girls (<b>G-1</b>…).</li>
           <li>Paste the boys in <b>BOYS</b> (left) and the girls in <b>GIRLS</b> (right), press <b>Fill</b>, check the names, then press <b>{saveLabel}</b>.</li>
         </ol>
-        <p className="text-xs text-emerald-200 bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-2 mt-3">🔒 Privacy (DO 15, s. 2026): learner names are saved <b>only on this device</b>. They are never sent to Claude. Answer sheets print only the CODE, so Claude only ever sees codes like B-7.</p>
+        <p className="text-xs text-emerald-200 bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-2 mt-3">🔒 Privacy (DO 15, s. 2026): learner names are saved <b>only on this device</b>. They are never sent to Claude. Names are printed on the answer sheets for handing out, but the scanner covers the name before anything goes to Claude, so Claude only ever sees codes like B-7.</p>
         <p className="text-[11px] text-slate-500 mt-2">Codes like B-1 are fixed and can't be edited. Numbers, codes, LRNs and extra Excel columns are removed when you paste. Pasting many names into one row fills downward from there.</p>
         <div className="flex flex-wrap items-center gap-3 mt-4">
           <button disabled={checking || total === 0} onClick={trySave} className="px-5 py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold disabled:opacity-40">
@@ -1375,16 +1626,16 @@ function GoogleButton({ onEmail, onFail }) {
   return <div ref={box} className="flex justify-center min-h-[44px]" />;
 }
 /* Cloudflare Turnstile "Verify you are human" */
-function HumanCheck({ onPass }) {
+function HumanCheck({ onPass, onError }) {
   const box = useRef(null); const [state, setState] = useState("loading");
   const siteKey = CFG.turnstileSiteKey || TURNSTILE_TEST_KEY;
   useEffect(() => { let alive = true, wid = null; (async () => {
     try {
       await loadScript("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit", "cf-turnstile");
       if (!alive || !window.turnstile) throw new Error("ts");
-      wid = window.turnstile.render(box.current, { sitekey: siteKey, theme: "dark", callback: t => { setState("ok"); onPass(t); }, "expired-callback": () => { setState("ready"); onPass(""); }, "error-callback": () => setState("error") });
+      wid = window.turnstile.render(box.current, { sitekey: siteKey, theme: "dark", callback: t => { setState("ok"); onPass(t); }, "expired-callback": () => { setState("ready"); onPass(""); }, "error-callback": () => { setState("error"); onError && onError(); } });
       setState("ready");
-    } catch (e) { if (alive) setState("error"); }
+    } catch (e) { if (alive) { setState("error"); onError && onError(); } }
   })(); return () => { alive = false; try { wid != null && window.turnstile.remove(wid); } catch (e) {} }; }, []);
   return <div className="my-3">
     <div ref={box} className="flex justify-center min-h-[65px]" />
@@ -1392,6 +1643,38 @@ function HumanCheck({ onPass }) {
     {state === "error" && <p className="text-xs text-amber-200 text-center">The human check couldn't load (no internet?). Connect to the internet and open this again.</p>}
     {!CFG.turnstileSiteKey && <p className="text-[10px] text-slate-500 text-center mt-1">Test mode: the real Cloudflare key isn't set yet.</p>}
   </div>;
+}
+
+/* Random "Verify you are human" checks while someone uses the website.
+   First check 5-15 minutes after opening, then every 20-45 minutes of time on the page (random).
+   Never interrupts the live camera or the photo aligner: it waits until they close. */
+const rnd = (a, b) => (a + Math.random() * (b - a)) * 60000;
+function RandomHumanCheck() {
+  const [show, setShow] = useState(false), [failed, setFailed] = useState(false), [k, setK] = useState(0);
+  const st = useRef({ used: 0, due: rnd(5, 15), last: Date.now() });
+  useEffect(() => {
+    const t = setInterval(() => {
+      const now = Date.now(), r = st.current;
+      if (document.visibilityState === "visible") r.used += Math.min(now - r.last, 60000);
+      r.last = now;
+      if (!show && r.used >= r.due && !(window.__jordynBusy > 0)) { setFailed(false); setK(x => x + 1); setShow(true); }
+    }, 15000);
+    return () => clearInterval(t);
+  }, [show]);
+  const pass = tok => { if (!tok) return; setTimeout(() => { st.current.used = 0; st.current.due = rnd(20, 45); setShow(false); }, 600); };
+  if (!show) return null;
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 z-[200] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="glass-strong rounded-2xl p-6 w-full max-w-sm text-center">
+        <div className="text-4xl mb-1">🛡️</div>
+        <h3 className="text-lg font-black text-white">Quick check</h3>
+        <p className="text-sm text-slate-300">Please confirm you're a person to keep using JordynAI. Your work is safe.</p>
+        <HumanCheck key={k} onPass={pass} onError={() => setFailed(true)} />
+        {failed && (navigator.onLine === false
+          ? <button onClick={() => pass("offline")} className="w-full py-2.5 rounded-xl bg-white/10 font-bold text-sm">No internet: continue</button>
+          : <button onClick={() => { setFailed(false); setK(x => x + 1); }} className="w-full py-2.5 rounded-xl bg-cyan-500 text-slate-950 font-bold text-sm">↻ Try again</button>)}
+      </div>
+    </div>, document.body);
 }
 
 /* ===================== LOCK SCREEN + SECURITY ===================== */
@@ -1512,6 +1795,7 @@ function Gate({ children }) {
       <button onClick={lockNow} className="text-cyan-300 hover:underline">🔒 Lock</button>
       {Acct.id && <button onClick={switchAccount} className="text-cyan-300 hover:underline">⇄ Switch account</button>}
     </div>}
+    {!store.db && <RandomHumanCheck />}
     {byAdmin && <div className="bg-amber-500/20 border-b border-amber-400/40 text-amber-100 text-xs text-center p-2">Unlocked with the {Vault.unlockedBy === "admin" ? "admin master password" : "recovery code"}. Set a new password in History → Security.</div>}
     {children}
   </>;
@@ -1659,6 +1943,7 @@ function App() {
   const [section, setSection] = useState("");
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState([]);
+  const [absent, setAbsent] = useState([]);                     // codes marked absent for THIS exam session
   const [rawText, setRawText] = useState("");
   const [rawErr, setRawErr] = useState("");
   const [passMark, setPassMark] = useState(70);
@@ -1693,10 +1978,13 @@ function App() {
     (async () => {
       await store.init();
       setSaveMode(store.db ? "Saved to your Claude account" : "Saved in this browser only");
-      const [p, c, k, ks, cl, h, pm] = await Promise.all([
+      const [p, c, k, ks, cl, h, pm, ss, ab] = await Promise.all([
         store.get("profile", DEFAULT_PROFILE), store.get("config", DEFAULT_CONFIG), store.get("key", null),
-        store.get("keySaved", false), store.get("classes", []), store.get("history", []), store.get("passMarkV2", 70)]);
+        store.get("keySaved", false), store.get("classes", []), store.get("history", []), store.get("passMarkV2", 70),
+        store.get("sessionStudents", []), store.get("sessionAbsent", [])]);
       setProfile(p); setConfig(c); if (k) setKey(k); setKeySaved(!!ks); setClasses(cl || []); setHistory(h || []); setPassMark(pm || 70);
+      if (Array.isArray(ss) && ss.length) setStudents(ss);                        // scanning survives closing the browser
+      if (Array.isArray(ab) && ab.length) setAbsent(ab);
       const rs = {};
       for (const lbl of (cl || [])) {
         let v = localStore.get(rosterKey(lbl), null);
@@ -1772,6 +2060,10 @@ function App() {
 
   /* learners */
   const addScanned = st => setStudents(list => [...list.filter(x => up(x.student_id) !== st.student_id), st]);
+  useEffect(() => { if (loaded) store.set("sessionStudents", students); }, [students, loaded]);
+  useEffect(() => { if (loaded) store.set("sessionAbsent", absent); }, [absent, loaded]);
+  const markAbsent = code => { setAbsent(a => (a.includes(code) ? a : [...a, code])); flash(code + " marked ABSENT for this exam."); };
+  const unmarkAbsent = code => setAbsent(a => a.filter(x => x !== code));
   const loadJson = () => {
     try {
       const o = JSON.parse(rawText);
@@ -1820,12 +2112,13 @@ function App() {
     }
     const enrolled = roster ? [...roster.boys.map((v, i) => v ? `B-${i + 1}` : null), ...roster.girls.map((v, i) => v ? `G-${i + 1}` : null)].filter(Boolean) : [];
     const testedIds = new Set(all.map(s => s.id));
-    const missing = enrolled.filter(id => !testedIds.has(id));
+    const absentIds = enrolled.filter(id => absent.includes(id) && !testedIds.has(id));
+    const missing = enrolled.filter(id => !testedIds.has(id) && !absentIds.includes(id));
     const notEnrolled = roster ? all.filter(s => gender(s.id) !== "?" && !rosterName(s.id)).map(s => s.id) : [];
     const scores = all.map(s => s.score);
     const passed = all.filter(s => s.pass).length;
     return {
-      enrolled, missing, notEnrolled, boys, girls, other, all, total, mean, mps, items, comps, passed,
+      enrolled, missing, notEnrolled, absentIds, boys, girls, other, all, total, mean, mps, items, comps, passed,
       sd: sdOf(all), bStats: grp(boys), gStats: grp(girls),
       high: scores.length ? Math.max(...scores) : 0, low: scores.length ? Math.min(...scores) : 0,
       critical: items.filter(i => i.foePct > 50),
@@ -1833,17 +2126,31 @@ function App() {
       mastered: items.filter(i => i.pctCorrect >= 75),
       passingRate: total ? passed / total * 100 : 0,
     };
-  }, [students, key, passMark, n, subj, tags, roster]);
+  }, [students, key, passMark, n, subj, tags, roster, absent]);
 
   const slot = config.slot || (config.examType === "term" ? "TE" : "ST1");
   const term = config.term || termNow();
   const examLabel = SLOTS[slot];
   const imgMeta = { gradeSection, term, slot, subject: subj.label };
   const imgPrefix = [gradeSection, term, slot, subj.label].join("|") + "|";
+  const scanQueue = useMemo(() => roster ? [...roster.boys.map((v, i) => v ? { code: `B-${i + 1}`, name: v } : null), ...roster.girls.map((v, i) => v ? { code: `G-${i + 1}`, name: v } : null)].filter(Boolean) : [], [roster]);
+  const scannedIds = useMemo(() => new Set(students.map(x => up(x.student_id || x.id || "").replace(/\s/g, ""))), [students]);
+  const [genLoading, setGenLoading] = useState(false);
+  const makeReport = () => { setGenLoading(true); setTimeout(() => { setGenLoading(false); setTab("grades"); window.scrollTo({ top: 0, behavior: "smooth" }); flash("Report ready for " + gradeSection + "."); }, 1800); };
   const [imgKeys, setImgKeys] = useState([]);
+  const [nameThumbs, setNameThumbs] = useState({});
   const [viewImg, setViewImg] = useState(null);   // { code, sheetUrl, nameUrl }
   const [exporting, setExporting] = useState("");
   useEffect(() => { if (tab === "grades") imgStore.keys(imgPrefix).then(k => setImgKeys(k.map(x => x.split("|").pop()))); }, [tab, students.length, imgPrefix]);
+  useEffect(() => {                                              // the learners' written names, shown right in the Gradesheet
+    if (tab !== "grades" || !imgKeys.length) { if (tab !== "grades") setNameThumbs({}); return; }
+    let alive = true; const urls = [];
+    (async () => { const m = {};
+      for (const code of imgKeys) { if (code === "KEY") continue;
+        try { const it = await imgStore.get(imgPrefix + code); if (it && it.name) { const u = URL.createObjectURL(it.name); urls.push(u); m[code] = u; } } catch (e) {} }
+      if (alive) setNameThumbs(m); else urls.forEach(u => URL.revokeObjectURL(u)); })();
+    return () => { alive = false; setTimeout(() => urls.forEach(u => URL.revokeObjectURL(u)), 400); };
+  }, [tab, imgKeys.join("|"), imgPrefix]);
   const openImg = async code => { const it = await imgStore.get(imgPrefix + code); if (!it) return flash(Vault.exists() && !Vault.isOpen() ? "Unlock first." : "No saved sheet for " + code); setViewImg({ code, sheetUrl: it.sheet && URL.createObjectURL(it.sheet), nameUrl: it.name && URL.createObjectURL(it.name) }); };
   const exportZip = async (prefix, label) => {
     if (!window.JSZip) return flash("ZIP tool not loaded. Check your internet once, then try again.");
@@ -1864,8 +2171,9 @@ function App() {
       ["Grade & Section", gradeSection], ["Term", term], ["Exam", examLabel], ["Subject", subj.label], ["Number of Items", n], [],
       ["GRADESHEET"], ["Group", "Learner ID", "Initials", ...key.map((_, i) => `Q${i + 1}`), "Score", "Percent", "Status", "Proficiency Level"]];
     data.all.forEach(s => rows.push([gender(s.id) === "B" ? "Boys" : gender(s.id) === "G" ? "Girls" : "Unsorted", s.id, withInitials ? s.name : "", ...s.marks.map(m => m ? 1 : 0), s.score, fmt(s.pct), s.pass ? "Passed" : "Failed", proficiency(s.pct).label]));
+    data.absentIds.forEach(id => rows.push([gender(id) === "B" ? "Boys" : "Girls", id, withInitials ? toInitials(rosterName(id)) : "", ...key.map(() => ""), "", "", "ABSENT", ""]));
     rows.push([], ["SUMMARY"], ["Total Learners", data.total], ["Boys", data.bStats.count], ["Girls", data.gStats.count],
-      ["Passing Mark (%)", passMark], ["Passed", data.passed], ["Failed", data.total - data.passed], ["Passing Rate (%)", fmt(data.passingRate)],
+      ["Passing Mark (%)", passMark], ["Passed", data.passed], ["Failed", data.total - data.passed], ["Absent", data.absentIds.length], ["Passing Rate (%)", fmt(data.passingRate)],
       ["Class Mean", fmt(data.mean)], ["Standard Deviation", fmt(data.sd)], ["Class MPS (%)", fmt(data.mps)], ["Proficiency Level", proficiency(data.mps).label],
       ["Boys Mean", fmt(data.bStats.mean)], ["Boys MPS (%)", fmt(data.bStats.mps)], ["Girls Mean", fmt(data.gStats.mean)], ["Girls MPS (%)", fmt(data.gStats.mps)],
       ["Highest Score", data.high], ["Lowest Score", data.low]);
@@ -1921,7 +2229,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
       scores: Object.fromEntries(data.all.filter(x => gender(x.id) !== "?").map(x => [x.id, x.score])),
       learners: data.total, boys: data.bStats.count, girls: data.gStats.count, mean: data.mean, sd: data.sd, mps: data.mps,
       level: proficiency(data.mps).label, passingRate: data.passingRate, passMark, critical: data.critical.map(i => i.no),
-      comps: data.comps.map(c => ({ label: c.label, mps: c.mps })), summary: summaryText, csv: buildCSV(false), csvName,
+      comps: data.comps.map(c => ({ label: c.label, mps: c.mps })), summary: summaryText, csv: buildCSV(false), csvName, absent: data.absentIds,
     };
     const h = [entry, ...history].slice(0, 300);
     setHistory(h); setModal(null);
@@ -1970,33 +2278,35 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
   const [blankBusy, setBlankBusy] = useState("");
   const resetAll = async () => {
     setResetBusy(true);
-    const keys = ["profile", "config", "key", "keySaved", "classes", "history", "passMark", "passMarkV2", ...classes.map(rosterKey)];
+    const keys = ["profile", "config", "key", "keySaved", "classes", "history", "passMark", "passMarkV2", "sessionStudents", "sessionAbsent", ...classes.map(rosterKey)];
     let ok = true;
     for (const k of keys) { if (!(await store.set(k, null))) ok = false; }
     await imgStore.wipe();
     if (!store.db) { Vault.erase(); window.location.reload(); return; }   // website: this email's data is gone; sign in again = new history
     try { Object.keys(localStorage).filter(k => k.startsWith("jordynai_")).forEach(k => localStorage.removeItem(k)); } catch (e) {}
     setProfile(DEFAULT_PROFILE); setConfig(DEFAULT_CONFIG); setKey(Array(50).fill("A")); setKeySaved(false);
-    setClasses([]); setRosters({}); setHistory([]); setPassMark(70); setStudents([]); setRawText("");
+    setClasses([]); setRosters({}); setHistory([]); setPassMark(70); setStudents([]); setAbsent([]); setRawText("");
     setGrade("Grade 7"); setSection(""); setRosterView(null); setOpenHist(null); setTab("setup");
     setResetBusy(false); setModal("profile");
     flash(ok ? "All data erased. Set up your school profile to start again." : "Data cleared here, but some saved items could not be erased. Try Reset again.");
   };
   const resetExam = async () => {
-    setStudents([]); setRawText(""); setKey(Array(config.itemCount).fill("A")); setKeySaved(false);
+    setStudents([]); setAbsent([]); setRawText(""); setKey(Array(config.itemCount).fill("A")); setKeySaved(false);
     await store.set("key", Array(config.itemCount).fill("A")); await store.set("keySaved", false);
+    await store.set("sessionStudents", null); await store.set("sessionAbsent", null);
     setModal(null); setTab("setup"); flash("Cleared. Set up the next exam.");
   };
 
   const goTab = t => {
-    if (t !== "setup" && !unlocked) { setShake(t); setTimeout(() => setShake(""), 600); flash(!profile.configured ? "Finish your school profile first." : "Save the Answer Key first to unlock this tab."); return; }
+    const ok = t === "setup" || (t === "scan" ? profile.configured : unlocked);   // the Scanner can SAVE the key (scan the KEY sheet), so it only needs the profile
+    if (!ok) { setShake(t); setTimeout(() => setShake(""), 600); flash(!profile.configured ? "Finish your school profile first." : "Save the Answer Key first (encode it, or scan the KEY sheet in the Scanner) to unlock this tab."); return; }
     setTab(t);
   };
 
   const TABS = [["setup", "⚙️ Class Setup"], ["scan", "📷 Scanner"], ["grades", "📋 Gradesheet"], ["chart", "📊 Item Analysis"], ["summary", "🧾 Summary & CSV"], ["history", "🗂️ History"]];
 
   /* ---------- tables ---------- */
-  const GradeTable = ({ title, rows, stats, tone }) => (
+  const GradeTable = ({ title, rows, stats, tone, absentRows = [] }) => (
     <div className="mb-6">
       <div className={`flex flex-wrap items-center justify-between gap-1 px-3 py-2 rounded-t-xl text-white ${tone}`}>
         <h3 className="font-bold">{title}</h3>
@@ -2005,7 +2315,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
       <div className="overflow-x-auto border border-white/10 border-t-0 rounded-b-xl bg-slate-900/50">
         <table className="w-full text-sm">
           <thead className="bg-white/5 text-slate-300"><tr>
-            <th className="p-2 text-left">ID</th><th className="p-2 text-left">Initials</th>
+            <th className="p-2 text-left">ID</th><th className="p-2 text-left">Name (as written on the sheet)</th>
             {key.map((_, i) => <th key={i} className="p-1 text-center w-7 font-mono text-xs">{i + 1}</th>)}
             <th className="p-2">Score</th><th className="p-2">%</th><th className="p-2">Status</th><th className="p-2 text-left">Level</th><th className="p-2">Sheet</th>
           </tr></thead>
@@ -2013,12 +2323,23 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
             {rows.length === 0 && <tr><td colSpan={key.length + 7} className="p-3 text-center text-slate-500">No learners</td></tr>}
             {rows.map(s => (
               <tr key={s.id} className="border-t border-white/5">
-                <td className="p-2 font-mono font-bold text-cyan-200">{s.id}</td><td className="p-2">{s.name}</td>
+                <td className="p-2 font-mono font-bold text-cyan-200">{s.id}</td>
+                <td className="p-2">{nameThumbs[s.id] ? <img src={nameThumbs[s.id]} alt={s.name} title={`Written name on the sheet (${s.name || s.id})`} className="h-6 max-w-[170px] object-contain rounded bg-white" /> : s.name}</td>
                 {s.marks.map((m, i) => <td key={i} title={`Answer: ${s.ans[i] || "-"}`} className={`p-1 text-center font-mono ${m ? "text-emerald-400" : "text-red-300 bg-red-500/10"}`}>{m ? "✓" : (s.ans[i] || "–")}</td>)}
                 <td className="p-2 text-center font-bold">{s.score}/{n}</td><td className="p-2 text-center">{fmt(s.pct)}</td>
                 <td className="p-2 text-center"><span className={`text-xs font-bold px-2 py-0.5 rounded ${s.pass ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"}`}>{s.pass ? "PASSED" : "FAILED"}</span></td>
                 <td className="p-2"><Badge pct={s.pct} /></td>
                 <td className="p-2 text-center">{imgKeys.includes(s.id) ? <button onClick={() => openImg(s.id)} className="text-lg" title="View scanned sheet">🖼️</button> : <span className="text-slate-600">–</span>}</td>
+              </tr>))}
+            {absentRows.map(id => (
+              <tr key={id} className="border-t border-white/5 opacity-75">
+                <td className="p-2 font-mono font-bold text-slate-400">{id}</td>
+                <td className="p-2 text-slate-400">{toInitials(rosterName(id))}</td>
+                <td colSpan={key.length} className="p-1 text-center text-xs text-slate-500">absent on exam day — no score, not counted in the statistics</td>
+                <td className="p-2 text-center font-bold text-slate-400">—</td><td className="p-2 text-center text-slate-400">—</td>
+                <td className="p-2 text-center"><span className="text-xs font-bold px-2 py-0.5 rounded bg-slate-500/30 text-slate-200">ABSENT</span></td>
+                <td className="p-2 text-slate-500 text-xs">—</td>
+                <td className="p-2 text-center"><span className="text-slate-600">–</span></td>
               </tr>))}
           </tbody>
         </table>
@@ -2058,7 +2379,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
         {/* TABS */}
         <nav className="flex flex-wrap gap-1 glass rounded-2xl p-1">
           {TABS.map(([k, l]) => {
-            const locked = k !== "setup" && !unlocked;
+            const locked = k === "setup" ? false : k === "scan" ? !profile.configured : !unlocked;
             return <button key={k} onClick={() => goTab(k)} className={`px-3 py-2 text-sm rounded-xl transition ${tab === k ? "bg-cyan-500 text-slate-950 font-bold" : "hover:bg-white/10 text-slate-300"} ${locked ? "opacity-50" : ""} ${shake === k ? "shake" : ""}`}>{locked ? "🔒 " : ""}{l}</button>;
           })}
         </nav>
@@ -2166,8 +2487,10 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
           <SecurityCard flash={flash} saveFile={saveFile} />
         </>}
 
-        {tab === "scan" && unlocked && <>
-          <ScanPanel onStudent={addScanned} onKey={onScannedKey} n={n} hasKey={keySaved} meta={imgMeta} />
+        {tab === "scan" && profile.configured && <>
+          <ScanPanel onStudent={addScanned} onKey={onScannedKey} n={n} hasKey={keySaved} meta={imgMeta}
+            queue={scanQueue} scannedIds={scannedIds} absent={absent} onAbsent={markAbsent} onUnabsent={unmarkAbsent}
+            gradeSection={gradeSection} onReport={makeReport} />
           <Card><p className="text-sm text-slate-300">{students.length} learner(s) in <b>{gradeSection}</b>. {students.length > 0 && <button onClick={() => setTab("grades")} className="text-cyan-300 underline">See Gradesheet →</button>}</p></Card>
         </>}
 
@@ -2180,8 +2503,9 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
               {"showDirectoryPicker" in window && <button disabled={!!exporting} onClick={() => exportFolder("")} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 disabled:opacity-40">💾 Save into a folder (laptop)</button>}
             </span>
           </div></Card>
-          <GradeTable title="BOYS" rows={data.boys} stats={data.bStats} tone="bg-blue-700/80" />
-          <GradeTable title="GIRLS" rows={data.girls} stats={data.gStats} tone="bg-pink-600/80" />
+          <GradeTable title="BOYS" rows={data.boys} stats={data.bStats} tone="bg-blue-700/80" absentRows={data.absentIds.filter(id => gender(id) === "B")} />
+          <GradeTable title="GIRLS" rows={data.girls} stats={data.gStats} tone="bg-pink-600/80" absentRows={data.absentIds.filter(id => gender(id) === "G")} />
+          {data.absentIds.length > 0 && <p className="text-sm text-slate-300 bg-slate-500/10 p-3 rounded-lg mb-2">🚫 Absent ({data.absentIds.length}): {data.absentIds.map(id => `${id} ${toInitials(rosterName(id))}`).join(", ")} — no score, not counted in the mean, MPS or item analysis.</p>}
           {data.missing.length > 0 && <p className="text-sm text-sky-200 bg-sky-500/10 p-3 rounded-lg mb-2">📝 Enrolled but no sheet yet ({data.missing.length}): {data.missing.map(id => `${id} ${toInitials(rosterName(id))}`).join(", ")}</p>}
           {data.notEnrolled.length > 0 && <p className="text-sm text-amber-200 bg-amber-500/10 p-3 rounded-lg mb-2">⚠ Scanned IDs not in this section's student list: {data.notEnrolled.join(", ")}. Check the shaded Learner ID or update the list.</p>}
           {data.other.length > 0 && <p className="text-sm text-amber-200 bg-amber-500/10 p-3 rounded-lg">{data.other.length} learner(s) have IDs that don't start with B- or G- ({data.other.map(s => s.id).join(", ")}). Fix their IDs to sort them.</p>}
@@ -2366,6 +2690,12 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
       </Modal>}
 
       {toast && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] bg-slate-800 border border-white/10 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{toast}</div>}
+      {genLoading && <div className="fixed inset-0 z-[300] bg-slate-950/90 backdrop-blur-sm flex flex-col items-center justify-center">
+        <div className="w-12 h-12 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+        <p className="mt-4 text-lg font-black text-white">Generating report…</p>
+        <p className="text-sm text-slate-400">{gradeSection} · individual learner and class statistics</p>
+        <div className="w-56 h-1.5 bg-white/10 rounded-full overflow-hidden mt-4"><div className="h-full bg-cyan-400 rounded-full animate-[genbar_1.8s_linear_forwards]" /></div>
+      </div>}
     </div>
   );
 }

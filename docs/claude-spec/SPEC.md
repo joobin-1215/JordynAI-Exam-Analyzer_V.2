@@ -1,7 +1,7 @@
 # JordynAI Exam Analyzer: Claude Design Spec (source of truth)
 
 Owner: **Joven R. Castro**, Teacher II (MAPEH), Leon Garcia Sr. National High School, Schools Division of Davao City, Region XI.
-Spec version: **1.6 · Nov 10, 2026** (Google replaces passwords; names on sheets; Print Extra Sheets) (aligned with DepEd Order No. 15, s. 2026, as reported; verify against the official text). This file overrides older plans and existing code (see `/AGENTS.md`).
+Spec version: **1.7 · Nov 11, 2026** (scanner fixed for real photos; guided scan flow)
 
 Two builds follow this spec:
 - **Android app** (this repo: Kotlin, Jetpack Compose, Firebase), built by Google AI Studio.
@@ -164,7 +164,20 @@ Grade (Kinder, Grade 1–12) plus Section (uppercase). Saved classes appear as q
 - No internet: accounts that signed in with Google on this device in the **last 24 hours** can still open (classroom scanning without Wi-Fi).
 - Without a Client ID the older email + device-password flow stays as a fallback.
 - **Named answer sheets now print the learner's NAME** (as typed in the class list) on the Name line, plus the CODE. Blank sheets still have an empty Name line. "Ask Claude" crops still blank out the Name line (codes only to AI).
+- **Random human checks (owner decision, Nov 10):** while signed in on the website, a full-screen Cloudflare "Verify you are human" check appears at random: first 5–15 minutes after opening, then every 20–45 minutes of time on the page. It never interrupts the live camera or photo aligner (waits until they close). No internet → a "continue" button.
 - **Print Extra Sheets** (bottom of the class list page, after saving): 4 drop-downs of that section's learners (plus the ANSWER KEY) → 1 A4 page with those 4 sheets, PDF or Word. Same name and code, so scanning still matches.
+
+## 7.5 Scanner fix after the first real-paper test + guided scan flow (owner decision, Nov 11)
+**What failed:** 19 of 20 real photos were rejected ("doesn't match 20 items", code shown as B-12). Cause: cut sheets photographed on a desk with other sheets nearby and the phone tilted. The corner search only looked at the first 40 dark blobs in reading order and predicted the bottom corners from the top edge with a tight tolerance, so it locked onto other sheets' corners or shaded bubbles.
+**Reader changes (all on the device, no AI):**
+- Each dark blob gets a *squareness* score (farthest pixel / sqrt(area): square 0.71, shaded bubble 0.56); corner squares are tried first.
+- Every set of 4 square blobs (top 18) is a candidate sheet if it is convex, opposite edges within ~34 degrees, corner sizes within 6x (tilt makes near corners bigger), height/width 1.12-2.15. Candidates are ranked by a quick bubble-ring check; the best 10 get the full check.
+- Several sheets in view: the matching sheet nearest the middle of the photo wins.
+- Glare/shadow: each row's shading threshold sits halfway between that row's printed item number (local black) and the local paper; washed-out rows are flagged. A "blank" row where one bubble is clearly darker than the rest is flagged, never silently blank.
+- CODE dots: threshold from the always-black first dot; any half-dark dot = code unsure, so the teacher types it (never a guessed code).
+- Live camera: if the quick corner check fails (clutter/tilt), a full search runs about twice a second.
+**Tested:** 21 shaded test sheets x 23 photo conditions (dark wood, black desk, 2-3 neighbouring sheets, keystone tilt up to 35%, sideways, upside down, glare, dim, blur, 12 MP, live-frame size): 0 wrong answers, 0 wrong codes; a corner off-frame is rejected. The owner's 4 iPhone photos: codes and answers match the answer guide.
+**Scan flow (website + Claude app):** guide "Scanning B-1 ... then G-1 ..." (any learner's sheet accepted); cashier beep + big check mark with the learner's written-name strip on success; buzz + big X on failure (no corners, code not in class, flagged items, already scanned: never overwritten unless the teacher taps Save to replace); Mark absent (shown as ABSENT, not counted); Take a break / Resume; "Finalize and Generate Report on [Grade - Section]" when every learner is scanned or absent, then about 1.3 s "Generating report..." and the Gradesheet. The Gradesheet name column shows each learner's written-name strip (initials only as fallback).
 
 ## 8. Scanner
 - Portrait viewfinder in a 1 : 1.414 frame with corner guides and the label "One quarter-sheet, portrait, 4 corners in view". One sheet per photo.
