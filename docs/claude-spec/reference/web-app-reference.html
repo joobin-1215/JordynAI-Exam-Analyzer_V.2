@@ -896,16 +896,23 @@ const Sync = {
       let remote = { map: {}, t: {}, imgs: {} };
       if (this.files["jordynai-data.bin"]) remote = await this.open(await this.download("jordynai-data.bin"));
       // merge: the newer change wins for each item
-      const changed = [];
+      const changed = [], size = v => (v == null ? 0 : JSON.stringify(v).length);
       const keys = new Set([...Object.keys(remote.t || {}), ...Object.keys(M.t)]);
       for (const k of keys) {
         const rt = (remote.t || {})[k] || 0, lt = M.t[k] || 0;
-        if (rt > lt || (rt && lt <= 1 && rt >= lt && JSON.stringify(remote.map[k]) !== JSON.stringify(local[k]))) { if (k in remote.map) local[k] = remote.map[k]; else delete local[k]; M.t[k] = rt; changed.push(k); }
+        // real edits (time > 1) beat older ones. Items saved before sync (time 1) on BOTH sides: keep the one with more in it,
+        // so an empty new device can never wipe a device that already has classes, scans or results.
+        const takeRemote = rt > 1 ? rt > lt : (rt === 1 && lt <= 1 && size(remote.map[k]) > size(local[k]));
+        if (takeRemote) { if (k in remote.map) local[k] = remote.map[k]; else delete local[k]; M.t[k] = rt; changed.push(k); }
       }
-      // items saved before sync was turned on (no timestamp yet): keep them, but let the other device's copy win
-      Object.keys(local).forEach(k => { if (k !== "__sync" && !(k in M.t)) M.t[k] = (remote.t || {})[k] ? 0 : 1; });
+      // items saved before sync was turned on get time 1 ("old")
+      Object.keys(local).forEach(k => { if (k !== "__sync" && !(k in M.t)) M.t[k] = 1; });
       let needUp = false;
-      for (const k of Object.keys(M.t)) if ((M.t[k] || 0) > ((remote.t || {})[k] || 0)) { needUp = true; break; }
+      for (const k of Object.keys(M.t)) {
+        const rt = (remote.t || {})[k] || 0;
+        if ((M.t[k] || 0) > rt) { needUp = true; break; }
+        if (M.t[k] === 1 && rt <= 1 && size(local[k]) > size((remote.map || {})[k])) { needUp = true; break; }   // ours is fuller
+      }
       // photos: send ours, fetch theirs
       const rImgs = remote.imgs || {}, haveLocal = new Set(await imgStore.keys());
       for (const k of haveLocal) if (!M.imgs[k]) M.imgs[k] = 1;
@@ -1749,13 +1756,26 @@ async function checkGoogleToken(jwt) {
   } catch (e) { if (e.message === "sig") throw e; }   // offline key fetch: the token still came straight from Google's button
   return { email: pay.email, name: pay.name || "" };
 }
+/* Backup sign-in: Google's classic pop-up (works where the newer sign-in button is blocked).
+   Google returns a short-lived access token; the verified email is read from Google's own userinfo service. */
+async function popupGoogleSignIn() {
+  await loadScript("https://accounts.google.com/gsi/client", "gsi-client");
+  const tok = await new Promise((res, rej) => {
+    const tc = google.accounts.oauth2.initTokenClient({ client_id: CFG.googleClientId, scope: "openid email profile", prompt: "select_account",
+      callback: r => r && r.access_token ? res(r) : rej(new Error(r && r.error || "no token")), error_callback: e => rej(new Error(e && e.type || "popup")) });
+    tc.requestAccessToken();
+  });
+  const u = await (await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers: { Authorization: "Bearer " + tok.access_token } })).json();
+  if (!u.email || u.email_verified === false) throw new Error("email");
+  return u.email;
+}
 function GoogleButton({ onEmail, onFail }) {
   const box = useRef(null);
   useEffect(() => { let alive = true; (async () => {
     try {
       await loadScript("https://accounts.google.com/gsi/client", "gsi-client");
       if (!alive || !window.google || !google.accounts) throw new Error("gsi");
-      google.accounts.id.initialize({ client_id: CFG.googleClientId, auto_select: false, cancel_on_tap_outside: true, use_fedcm_for_button: true,
+      google.accounts.id.initialize({ client_id: CFG.googleClientId, auto_select: false, cancel_on_tap_outside: true,
         callback: async r => { try { const u = await checkGoogleToken(r.credential); onEmail(u.email); } catch (e) { onFail("Google sign-in couldn't be checked (" + e.message + "). Try again."); } } });
       google.accounts.id.renderButton(box.current, { theme: "filled_black", size: "large", shape: "pill", text: "signin_with", width: 300 });
     } catch (e) { if (alive) onFail("offline"); }
@@ -2002,6 +2022,7 @@ function Gate({ children }) {
           <p className="text-sm text-slate-300 mb-3">Sign in with your Google account. No other password needed. Google checks your password on its own page: <b>this website never sees your email password.</b></p>
           {busy && <p className="text-xs text-cyan-300 mb-2">Opening your data…</p>}
           <GoogleButton onEmail={m => signedIn(m, "google")} onFail={m => { if (m === "offline") { setOffline(true); setErr(""); } else setErr(m); }} />
+          <button onClick={async () => { setErr(""); try { const m = await popupGoogleSignIn(); signedIn(m, "google"); } catch (e) { setErr(e.message === "popup" || e.message === "popup_closed" ? "The Google window was closed or blocked. Allow pop-ups for this site and try again." : "Google sign-in didn't finish (" + e.message + "). Try again."); } }} className="w-full mt-2 text-xs text-cyan-300 underline">Button not working? Sign in with the Google pop-up instead</button>
         </> : GOOGLE_ONLY ? <>
           <p className="text-sm text-slate-300 mb-3">No internet, so Google can't sign you in right now. Accounts that signed in with Google <b>on this device in the last 24 hours</b> can still open:</p>
           <div className="space-y-2">
