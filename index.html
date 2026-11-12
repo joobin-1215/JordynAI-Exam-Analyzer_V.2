@@ -822,7 +822,19 @@ const imgStore = {
      (scope drive.appdata: the app sees only its own files, never the teacher's other Drive files).
    - Lock: the sync key is kept in that same hidden folder (owner chose "Google sign-in only").
    - Per-key last-change-wins merge; deletions travel as tombstones; sheet photos + name strips sync as separate files. */
-const SYNC_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+const SYNC_SCOPE = "https://www.googleapis.com/auth/drive.appdata email";   // email: to check the right Gmail was picked
+const SYNC_REDIRECT = location.origin + location.pathname;                      // full-page sign-in comes back here
+/* Coming back from the full-page Google sign-in: keep the token for this tab, clean the address bar */
+(() => {
+  try {
+    const h = new URLSearchParams(location.hash.slice(1));
+    if (h.get("access_token") && h.get("state") && h.get("state") === sessionStorage.getItem("jordynai_sync_state")) {
+      sessionStorage.setItem("jordynai_sync_tok", JSON.stringify({ t: h.get("access_token"), exp: Date.now() + (+h.get("expires_in") || 3600) * 1000 }));
+      sessionStorage.removeItem("jordynai_sync_state");
+      history.replaceState(null, "", location.pathname + location.search);
+    } else if (h.get("error") && h.get("state")) { sessionStorage.setItem("jordynai_sync_err", h.get("error")); history.replaceState(null, "", location.pathname + location.search); }
+  } catch (e) {}
+})();
 const DRIVE = "https://www.googleapis.com/drive/v3/files", DRIVE_UP = "https://www.googleapis.com/upload/drive/v3/files";
 const b64e = u8 => btoa(String.fromCharCode(...u8));
 const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
@@ -839,13 +851,33 @@ const Sync = {
   stampImg(k) { if (!this.isOn()) return; this.meta().imgs[k] = Date.now(); this.schedule(); },
   schedule(ms = 2500) { clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), ms); },
   /* ---- Google access token (needs one tap per session on iPhone: Safari blocks pop-ups without a tap) ---- */
-  hasToken() { return this.token && Date.now() < this.tokenExp - 60000; },
+  hasToken() {
+    if (!this.token) { try { const k = JSON.parse(sessionStorage.getItem("jordynai_sync_tok") || "null"); if (k && Date.now() < k.exp - 60000) { this.token = k.t; this.tokenExp = k.exp; } } catch (e) {} }
+    return this.token && Date.now() < this.tokenExp - 60000;
+  },
+  keepToken() { try { sessionStorage.setItem("jordynai_sync_tok", JSON.stringify({ t: this.token, exp: this.tokenExp })); } catch (e) {} },
+  /* full-page Google sign-in (no pop-up): for browsers where the pop-up closes or is blocked */
+  redirect(turnOn) {
+    const state = Array.from(rand(16), b => b.toString(16).padStart(2, "0")).join("");
+    sessionStorage.setItem("jordynai_sync_state", state);
+    if (turnOn) sessionStorage.setItem("jordynai_sync_join", Acct.id);
+    const q = new URLSearchParams({ client_id: CFG.googleClientId, redirect_uri: SYNC_REDIRECT, response_type: "token", scope: SYNC_SCOPE, include_granted_scopes: "true", state, prompt: turnOn ? "consent" : "none" });
+    if (Acct.email) q.set("login_hint", Acct.email);
+    location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + q;
+  },
+  /* the token must belong to the Gmail signed in to the app (never sync into someone else's Drive) */
+  async checkOwner() {
+    if (this.ownerOk === this.token) return;
+    const r = await (await fetch("https://oauth2.googleapis.com/tokeninfo?access_token=" + encodeURIComponent(this.token))).json();
+    if (Acct.email && r.email && r.email.toLowerCase() !== Acct.email.toLowerCase()) { this.token = ""; try { sessionStorage.removeItem("jordynai_sync_tok"); } catch (e) {} throw new Error("wrong-account:" + r.email); }
+    this.ownerOk = this.token;
+  },
   async connect(prompt = "") {
     await loadScript("https://accounts.google.com/gsi/client", "gsi-client");
     return new Promise((res, rej) => {
       const tc = google.accounts.oauth2.initTokenClient({
         client_id: CFG.googleClientId, scope: SYNC_SCOPE, login_hint: Acct.email || undefined, prompt,
-        callback: r => { if (r && r.access_token) { this.token = r.access_token; this.tokenExp = Date.now() + (r.expires_in || 3600) * 1000; res(true); } else rej(new Error(r && r.error || "no token")); },
+        callback: r => { if (r && r.access_token) { this.token = r.access_token; this.tokenExp = Date.now() + (r.expires_in || 3600) * 1000; this.keepToken(); res(true); } else rej(new Error(r && r.error || "no token")); },
         error_callback: e => rej(new Error(e && e.type || "popup")),
       });
       tc.requestAccessToken();
@@ -885,6 +917,7 @@ const Sync = {
     if (!this.hasToken()) { this.set("tap", "Tap ☁️ to sync with your other devices"); return; }
     this.busy = true; this.set("syncing", "Syncing…");
     try {
+      await this.checkOwner();
       this.files = await this.list();
       if (!this.key) {
         let raw;
@@ -939,13 +972,17 @@ const Sync = {
       if (changed.length || gotImgs) window.dispatchEvent(new CustomEvent("jordynai-synced", { detail: { changed, gotImgs } }));
     } catch (e) {
       const m = e.message;
-      this.set(m === "needs-tap" ? "tap" : "error", m === "needs-tap" ? "Tap ☁️ to reconnect sync" : m === "drive-off" ? "Google Drive API is not switched on for this app yet" : "Sync failed (" + m + "). Will retry.");
-      if (m !== "needs-tap" && m !== "drive-off") this.schedule(30000);
+      const wrong = m.startsWith("wrong-account:");
+      this.set(m === "needs-tap" ? "tap" : "error", m === "needs-tap" ? "Tap ☁️ to reconnect sync" : m === "drive-off" ? "Google Drive API is not switched on for this app yet" : wrong ? `You picked ${m.slice(14)} in the Google window. Pick ${Acct.hint} (the Gmail signed in here).` : "Sync failed (" + m + "). Will retry.");
+      if (m !== "needs-tap" && m !== "drive-off" && !wrong) this.schedule(30000);
     }
     this.busy = false;
     if (this.pending) { this.pending = false; this.schedule(500); }
   },
-  start() { clearInterval(this.poll); if (!this.isOn()) return; this.poll = setInterval(() => { if (document.visibilityState === "visible") this.run(); }, 30000); this.schedule(300); },
+  start() {
+    clearInterval(this.poll);
+    try { if (sessionStorage.getItem("jordynai_sync_join") === Acct.id && this.hasToken()) { sessionStorage.removeItem("jordynai_sync_join"); localStorage.setItem(this.onKey(), "1"); } } catch (e) {}
+    if (!this.isOn()) return; this.poll = setInterval(() => { if (document.visibilityState === "visible") this.run(); }, 30000); this.schedule(300); },
   stop() { clearInterval(this.poll); clearTimeout(this.timer); this.token = ""; this.key = null; this.files = {}; this.set("off"); },
   async turnOn() {                                       // must be called from a tap
     await this.connect("consent");
@@ -955,7 +992,7 @@ const Sync = {
   turnOff() { try { localStorage.removeItem(this.onKey()); } catch (e) {} this.stop(); },
   /* RESET ALL with "also erase the synced copy": delete every file in the hidden app folder */
   async wipeCloud() { const files = await this.list(); for (const f of Object.values(files)) await this.api(`${DRIVE}/${f.id}`, { method: "DELETE" }); },
-  async tap() { try { await this.connect(""); this.set("syncing", "Syncing…"); await this.run(); } catch (e) { this.set("tap", "Couldn't connect to Google. Tap ☁️ to try again."); } },
+  async tap() { try { await this.connect(""); this.set("syncing", "Syncing…"); await this.run(); } catch (e) { this.set("tap", "The Google window closed. Use \"Connect without a pop-up\" in 🛡️ Security, or tap ☁️ to try again."); this.popupFailed = true; this.listeners.forEach(f => f()); } },
 };
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && Sync.isOn()) Sync.schedule(800); });
 function useSync() { const [, f] = useState(0); useEffect(() => { const h = () => f(x => x + 1); Sync.listeners.add(h); return () => Sync.listeners.delete(h); }, []); return Sync; }
@@ -1881,8 +1918,10 @@ function SyncJoinBanner() {
   return ReactDOM.createPortal(<div className="fixed top-3 left-1/2 -translate-x-1/2 z-[120] w-[min(94vw,520px)] rounded-2xl border border-sky-400/50 bg-slate-900/95 p-4 shadow-2xl">
     <p className="text-sm text-white font-bold">☁️ Already using JordynAI on your MacBook or iPhone?</p>
     <p className="text-xs text-slate-300 mt-1">Turn on sync to bring your classes, learners, keys and results here from your other device (same Gmail). No need to fill the profile again.</p>
-    <button disabled={busy} onClick={async () => { setBusy(true); setErr(""); try { await Sync.turnOn(); } catch (e) { setErr("Google didn't give permission (" + e.message + "). Allow pop-ups and try again."); } setBusy(false); }} className="mt-2 px-4 py-2 rounded-lg bg-sky-500 text-slate-950 font-black text-sm disabled:opacity-50">{busy ? "Bringing your data…" : "☁️ Turn on sync on this device"}</button>
-    {err && <p className="text-xs text-red-300 mt-1">{err}</p>}
+    <button disabled={busy} onClick={async () => { setBusy(true); setErr(""); try { await Sync.turnOn(); } catch (e) { setErr("The Google window closed before it finished (" + e.message + "). Use the button below instead."); } setBusy(false); }} className="mt-2 px-4 py-2 rounded-lg bg-sky-500 text-slate-950 font-black text-sm disabled:opacity-50">{busy ? "Bringing your data…" : "☁️ Turn on sync on this device"}</button>
+    {err && <><p className="text-xs text-red-300 mt-1">{err}</p>
+      <button onClick={() => Sync.redirect(true)} className="mt-2 px-4 py-2 rounded-lg bg-white text-slate-900 font-bold text-sm">🔗 Connect without a pop-up (opens Google in this tab)</button>
+      <p className="text-[11px] text-slate-400 mt-1">You'll come back here and sign in with Google once more; then your data arrives by itself.</p></>}
   </div>, document.body);
 }
 /* Security card section: turn device sync on/off */
@@ -1890,7 +1929,9 @@ function SyncCard() {
   const S = useSync(); const [busy, setBusy] = useState(false), [err, setErr] = useState("");
   if (!S.available()) return null;
   const on = S.isOn();
-  const go = async () => { setBusy(true); setErr(""); try { await S.turnOn(); } catch (e) { setErr("Google didn't give permission (" + e.message + "). Allow pop-ups for this site and try again."); } setBusy(false); };
+  const go = async () => { setBusy(true); setErr(""); try { await S.turnOn(); } catch (e) { S.popupFailed = true; setErr(e.message === "popup_closed" || e.message === "popup_failed_to_open" || e.message === "popup" ? "The Google window closed before it finished. Use the button below instead (it opens Google in this same tab, no pop-up)." : "Google didn't give permission (" + e.message + "). Try the button below."); } setBusy(false); };
+  const redirectBtn = <button onClick={() => S.redirect(!on)} className="mt-2 ml-0 px-4 py-2 rounded-lg bg-white text-slate-900 font-bold text-sm">🔗 Connect without a pop-up (opens Google in this tab)</button>;
+  const backErr = (() => { try { const e = sessionStorage.getItem("jordynai_sync_err"); if (e) sessionStorage.removeItem("jordynai_sync_err"); return e; } catch (x) { return null; } })();
   return <div className="mt-5 rounded-xl border border-sky-400/30 bg-sky-500/10 p-3">
     <h4 className="font-black text-white">☁️ Sync this device with your other devices</h4>
     <p className="text-xs text-slate-300 mt-1">Signed in as <b>{Acct.hint}</b>. Your classes, learner lists, answer keys, results, history, sheet photos and name strips are kept in a <b>hidden app folder in your own Google Drive</b>, so your MacBook and iPhone stay the same. The app can only see its own hidden folder, never your other Drive files.</p>
@@ -1906,6 +1947,8 @@ function SyncCard() {
       <p className="text-[11px] text-slate-400 mt-2">Do this on each device you want in sync (your MacBook and your iPhone), signed in with the same Gmail. A borrowed computer stays separate unless you turn it on there.</p>
     </>}
     {err && <p className="text-xs text-red-300 mt-2">{err}</p>}
+    {backErr && <p className="text-xs text-red-300 mt-2">Google didn't finish connecting ({backErr}). Try again.</p>}
+    {(err || S.popupFailed || backErr || (on && S.state === "tap")) && <div>{redirectBtn}<p className="text-[11px] text-slate-400 mt-1">You'll come back here and sign in with Google once more; then sync starts by itself.</p></div>}
     {S.state === "error" && /Drive API/.test(S.msg) && <p className="text-xs text-amber-200 mt-2">The school admin must switch on "Google Drive API" once in Google Cloud for this website.</p>}
   </div>;
 }
