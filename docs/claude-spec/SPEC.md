@@ -1,7 +1,7 @@
 # JordynAI Exam Analyzer: Claude Design Spec (source of truth)
 
 Owner: **Joven R. Castro**, Teacher II (MAPEH), Leon Garcia Sr. National High School, Schools Division of Davao City, Region XI.
-Spec version: **1.7 · Nov 11, 2026** (scanner fixed for real photos; guided scan flow)
+Spec version: **1.8 · Nov 12, 2026** (MacBook-iPhone sync through the teacher's Google Drive)
 
 Two builds follow this spec:
 - **Android app** (this repo: Kotlin, Jetpack Compose, Firebase), built by Google AI Studio.
@@ -178,6 +178,18 @@ Grade (Kinder, Grade 1–12) plus Section (uppercase). Saved classes appear as q
 - Live camera: if the quick corner check fails (clutter/tilt), a full search runs about twice a second.
 **Tested:** 21 shaded test sheets x 23 photo conditions (dark wood, black desk, 2-3 neighbouring sheets, keystone tilt up to 35%, sideways, upside down, glare, dim, blur, 12 MP, live-frame size): 0 wrong answers, 0 wrong codes; a corner off-frame is rejected. The owner's 4 iPhone photos: codes and answers match the answer guide.
 **Scan flow (website + Claude app):** guide "Scanning B-1 ... then G-1 ..." (any learner's sheet accepted); cashier beep + big check mark with the learner's written-name strip on success; buzz + big X on failure (no corners, code not in class, flagged items, already scanned: never overwritten unless the teacher taps Save to replace); Mark absent (shown as ABSENT, not counted); Take a break / Resume; "Finalize and Generate Report on [Grade - Section]" when every learner is scanned or absent, then about 1.3 s "Generating report..." and the Gradesheet. The Gradesheet name column shows each learner's written-name strip (initials only as fallback).
+
+## 7.6 Device sync through the teacher's own Google Drive (owner decision, Nov 12)
+- Purpose: paste learner names on the MacBook, scan on the iPhone; both show the same data. Same Gmail on both.
+- Storage: hidden `appDataFolder` of the teacher's own Google Drive, OAuth scope `https://www.googleapis.com/auth/drive.appdata` (Google lists it as non-sensitive: no app review). The app sees only its own hidden files. Not GitHub (names in a repo, tokens on phones), not Firebase Storage (needs Blaze billing).
+- Opt-in per device: "☁️ Turn on sync on this device" (History → Security, or the banner on a new device's empty profile screen). Devices without it stay separate (replaces the Nov 10 "new device = new history" rule only for opted-in devices).
+- Lock: owner chose "Google sign-in only": a random AES-256 sync key is kept in the same hidden folder (`jordynai-synckey.json`); data (`jordynai-data.bin`) and each sheet photo + name strip (`img-<hash>`) are AES-GCM encrypted with it. Anyone who gets into the teacher's Google account could read it; Drive alone shows only scrambled files.
+- Merge: every saved item has a change time; the newer change wins per item; deletions travel as tombstones; data saved before sync was turned on lets the other device's copy win on a tie. Photos sync both ways.
+- Timing: upload ~2.5 s after a save; the other device syncs on opening, when brought to the front, every 30 s while open, and on "🔄 Sync now". Other-device changes refresh the screen, but never during scanning.
+- Google access token lasts about 1 hour; iPhone Safari needs one tap ("☁️ Tap to sync" in the top bar) to reconnect.
+- RESET ALL with sync on: tick "Also erase the synced copy in Google Drive" to empty every device; unticked = this device only, and sync turns off here so the cloud copy can't refill it.
+- One-time admin step: enable "Google Drive API" in Google Cloud project gen-lang-client-0454143897 (and add the drive.appdata scope under Data Access).
+- Tested: two simulated devices with a mock Drive: Mac to iPhone first sync in ~0.5 s, class added on iPhone reached Mac, roster change on Mac reached iPhone, sheet photo reached Mac, cloud files contain no readable names, expired token shows "Tap to sync" and one tap reconnects.
 
 ## 8. Scanner
 - Portrait viewfinder in a 1 : 1.414 frame with corner guides and the label "One quarter-sheet, portrait, 4 corners in view". One sheet per photo.

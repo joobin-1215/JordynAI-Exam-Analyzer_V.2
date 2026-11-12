@@ -769,7 +769,7 @@ const Vault = {
     localStorage.setItem(key, JSON.stringify({ v: 1, wraps, data }));
   },
   get(k, fb) { const v = this.map ? this.map[k] : undefined; return v == null ? fb : JSON.parse(JSON.stringify(v)); },
-  set(k, v) { if (!this.map) return false; if (v == null) delete this.map[k]; else this.map[k] = v; clearTimeout(this.saveTimer); this.saveTimer = setTimeout(() => this.save(), 250); return true; },
+  set(k, v) { if (!this.map) return false; if (v == null) delete this.map[k]; else this.map[k] = v; Sync.stamp(k); clearTimeout(this.saveTimer); this.saveTimer = setTimeout(() => this.save(), 250); return true; },
   async flush() { clearTimeout(this.saveTimer); await this.save(); },
   lock() { clearTimeout(this.saveTimer); this.save(); this.map = null; this.dek = null; this.rawDek = null; this.wraps = null; this.unlockedBy = ""; },
   /* erase ONLY the signed-in account's data on this device (other emails on this device are untouched) */
@@ -801,7 +801,7 @@ const imgStore = {
     return new Blob([rec.data], { type: "image/jpeg" });
   },
   key: (m, code) => [m.gradeSection, m.term, m.slot, m.subject, code].join("|"),
-  async put(meta, code, sheet, name) { try { const rec = { sheet: await this.seal(sheet), name: name ? await this.seal(name) : null, meta: { ...meta, code }, at: Date.now() }; await this.tx("readwrite", st => st.put(rec, this.key(meta, code))); return true; } catch (e) { return false; } },
+  async put(meta, code, sheet, name) { try { const rec = { sheet: await this.seal(sheet), name: name ? await this.seal(name) : null, meta: { ...meta, code }, at: Date.now() }; await this.tx("readwrite", st => st.put(rec, this.key(meta, code))); Sync.stampImg(this.key(meta, code)); return true; } catch (e) { return false; } },
   async get(k) { try { const rec = await this.tx("readonly", st => st.get(k)); if (!rec) return null; return { sheet: await this.unseal(rec.sheet), name: await this.unseal(rec.name), meta: rec.meta }; } catch (e) { return null; } },
   async keys(prefix = "") { try { return (await this.tx("readonly", st => st.getAllKeys())).filter(k => String(k).startsWith(prefix)); } catch (e) { return []; } },
   async wipe() { try { const n = this.dbName(); this.close(); await new Promise(r => { const rq = indexedDB.deleteDatabase(n); rq.onsuccess = rq.onerror = rq.onblocked = () => r(); }); } catch (e) {} },
@@ -816,6 +816,143 @@ const imgStore = {
     } catch (e) {}
   },
 };
+/* ===================== DEVICE SYNC (Google Drive, hidden app folder) =====================
+   Owner decision (Nov 12): MacBook <-> iPhone sync through the teacher's own Gmail.
+   - Each device opts in ("Turn on sync"). Data lives in the hidden appDataFolder of the teacher's OWN Google Drive
+     (scope drive.appdata: the app sees only its own files, never the teacher's other Drive files).
+   - Lock: the sync key is kept in that same hidden folder (owner chose "Google sign-in only").
+   - Per-key last-change-wins merge; deletions travel as tombstones; sheet photos + name strips sync as separate files. */
+const SYNC_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+const DRIVE = "https://www.googleapis.com/drive/v3/files", DRIVE_UP = "https://www.googleapis.com/upload/drive/v3/files";
+const b64e = u8 => btoa(String.fromCharCode(...u8));
+const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const Sync = {
+  token: "", tokenExp: 0, key: null, files: {}, lastData: "", busy: false, timer: null, poll: null, pending: false,
+  state: "off", msg: "", lastOk: 0, listeners: new Set(),
+  onKey: () => "jordynai_sync_on:" + Acct.id,
+  isOn() { try { return !!Acct.id && localStorage.getItem(this.onKey()) === "1"; } catch (e) { return false; } },
+  available: () => !!CFG.googleClientId && !store.db,
+  set(state, msg = "") { this.state = state; this.msg = msg; this.listeners.forEach(f => f()); },
+  /* ---- timestamps for each saved item (kept inside the encrypted vault) ---- */
+  meta() { if (!Vault.map) return {}; return Vault.map.__sync || (Vault.map.__sync = { t: {}, imgs: {} }); },
+  stamp(k) { if (!this.isOn() || k === "__sync") return; this.meta().t[k] = Date.now(); this.schedule(); },
+  stampImg(k) { if (!this.isOn()) return; this.meta().imgs[k] = Date.now(); this.schedule(); },
+  schedule(ms = 2500) { clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), ms); },
+  /* ---- Google access token (needs one tap per session on iPhone: Safari blocks pop-ups without a tap) ---- */
+  hasToken() { return this.token && Date.now() < this.tokenExp - 60000; },
+  async connect(prompt = "") {
+    await loadScript("https://accounts.google.com/gsi/client", "gsi-client");
+    return new Promise((res, rej) => {
+      const tc = google.accounts.oauth2.initTokenClient({
+        client_id: CFG.googleClientId, scope: SYNC_SCOPE, login_hint: Acct.email || undefined, prompt,
+        callback: r => { if (r && r.access_token) { this.token = r.access_token; this.tokenExp = Date.now() + (r.expires_in || 3600) * 1000; res(true); } else rej(new Error(r && r.error || "no token")); },
+        error_callback: e => rej(new Error(e && e.type || "popup")),
+      });
+      tc.requestAccessToken();
+    });
+  },
+  async api(url, opt = {}) {
+    if (!this.hasToken()) throw new Error("needs-tap");
+    const r = await fetch(url, { ...opt, headers: { ...(opt.headers || {}), Authorization: "Bearer " + this.token } });
+    if (r.status === 401) { this.token = ""; throw new Error("needs-tap"); }
+    if (r.status === 403) { const t = await r.text(); throw new Error(/has not been used|disabled/i.test(t) ? "drive-off" : "forbidden"); }
+    if (!r.ok) throw new Error("drive " + r.status);
+    return r;
+  },
+  async list() {
+    const out = {}; let page = "";
+    do {
+      const r = await (await this.api(`${DRIVE}?spaces=appDataFolder&pageSize=1000&fields=nextPageToken,files(id,name,modifiedTime)${page ? "&pageToken=" + page : ""}`)).json();
+      (r.files || []).forEach(f => { out[f.name] = f; }); page = r.nextPageToken || "";
+    } while (page);
+    return out;
+  },
+  async upload(name, bytes, mime = "application/octet-stream") {
+    const f = this.files[name];
+    if (f) { await this.api(`${DRIVE_UP}/${f.id}?uploadType=media`, { method: "PATCH", headers: { "Content-Type": mime }, body: bytes }); return; }
+    const bd = "jordynai" + Math.random().toString(36).slice(2), meta = JSON.stringify({ name, parents: ["appDataFolder"] });
+    const body = new Blob([`--${bd}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${bd}\r\nContent-Type: ${mime}\r\n\r\n`, bytes, `\r\n--${bd}--`]);
+    const r = await (await this.api(`${DRIVE_UP}?uploadType=multipart&fields=id,name,modifiedTime`, { method: "POST", headers: { "Content-Type": "multipart/related; boundary=" + bd }, body })).json();
+    this.files[name] = r;
+  },
+  async download(name) { return new Uint8Array(await (await this.api(`${DRIVE}/${this.files[name].id}?alt=media`)).arrayBuffer()); },
+  async seal(obj) { const iv = rand(12), ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, this.key, obj instanceof Uint8Array ? obj : enc.encode(JSON.stringify(obj)))); const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12); return out; },
+  async open(bytes, raw = false) { const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytes.slice(0, 12) }, this.key, bytes.slice(12))); return raw ? pt : JSON.parse(dec.decode(pt)); },
+  imgName: async k => "img-" + Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(k))).slice(0, 16), b => b.toString(16).padStart(2, "0")).join(""),
+  /* ---- one full sync: download -> merge -> upload ---- */
+  async run() {
+    if (!this.isOn() || !Vault.isOpen() || this.busy) { if (this.busy) this.pending = true; return; }
+    if (!this.hasToken()) { this.set("tap", "Tap ☁️ to sync with your other devices"); return; }
+    this.busy = true; this.set("syncing", "Syncing…");
+    try {
+      this.files = await this.list();
+      if (!this.key) {
+        let raw;
+        if (this.files["jordynai-synckey.json"]) raw = b64d(JSON.parse(dec.decode(await this.download("jordynai-synckey.json"))).k);
+        else { raw = rand(32); await this.upload("jordynai-synckey.json", enc.encode(JSON.stringify({ v: 1, k: b64e(raw) })), "application/json"); }
+        this.key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
+      }
+      const M = this.meta(), local = Vault.map;
+      let remote = { map: {}, t: {}, imgs: {} };
+      if (this.files["jordynai-data.bin"]) remote = await this.open(await this.download("jordynai-data.bin"));
+      // merge: the newer change wins for each item
+      const changed = [];
+      const keys = new Set([...Object.keys(remote.t || {}), ...Object.keys(M.t)]);
+      for (const k of keys) {
+        const rt = (remote.t || {})[k] || 0, lt = M.t[k] || 0;
+        if (rt > lt || (rt && lt <= 1 && rt >= lt && JSON.stringify(remote.map[k]) !== JSON.stringify(local[k]))) { if (k in remote.map) local[k] = remote.map[k]; else delete local[k]; M.t[k] = rt; changed.push(k); }
+      }
+      // items saved before sync was turned on (no timestamp yet): keep them, but let the other device's copy win
+      Object.keys(local).forEach(k => { if (k !== "__sync" && !(k in M.t)) M.t[k] = (remote.t || {})[k] ? 0 : 1; });
+      let needUp = false;
+      for (const k of Object.keys(M.t)) if ((M.t[k] || 0) > ((remote.t || {})[k] || 0)) { needUp = true; break; }
+      // photos: send ours, fetch theirs
+      const rImgs = remote.imgs || {}, haveLocal = new Set(await imgStore.keys());
+      for (const k of haveLocal) if (!M.imgs[k]) M.imgs[k] = 1;
+      for (const [k, t] of Object.entries(M.imgs)) if (t > (rImgs[k] || 0) && haveLocal.has(k)) {
+        const it = await imgStore.get(k); if (!it || !it.sheet) continue;
+        const pack = { meta: it.meta, sheet: b64e(new Uint8Array(await it.sheet.arrayBuffer())), name: it.name ? b64e(new Uint8Array(await it.name.arrayBuffer())) : "" };
+        await this.upload(await this.imgName(k), await this.seal(pack)); needUp = true;
+      }
+      let gotImgs = 0;
+      for (const [k, t] of Object.entries(rImgs)) if (t > (M.imgs[k] || 0) || !haveLocal.has(k)) {
+        const nm = await this.imgName(k); if (!this.files[nm]) continue;
+        const p = await this.open(await this.download(nm));
+        const toBlob = s => new Blob([b64d(s)], { type: "image/jpeg" });
+        const m = p.meta; await imgStore.put(m, m.code, toBlob(p.sheet), p.name ? toBlob(p.name) : null);
+        M.imgs[k] = t; gotImgs++;
+      }
+      if (needUp || !this.files["jordynai-data.bin"]) {
+        const out = { v: 1, map: {}, t: M.t, imgs: { ...rImgs, ...M.imgs } };
+        Object.keys(local).forEach(k => { if (k !== "__sync") out.map[k] = local[k]; });
+        await this.upload("jordynai-data.bin", await this.seal(out));
+      }
+      await Vault.flush();
+      this.lastOk = Date.now(); this.set("ok", "Synced");
+      if (changed.length || gotImgs) window.dispatchEvent(new CustomEvent("jordynai-synced", { detail: { changed, gotImgs } }));
+    } catch (e) {
+      const m = e.message;
+      this.set(m === "needs-tap" ? "tap" : "error", m === "needs-tap" ? "Tap ☁️ to reconnect sync" : m === "drive-off" ? "Google Drive API is not switched on for this app yet" : "Sync failed (" + m + "). Will retry.");
+      if (m !== "needs-tap" && m !== "drive-off") this.schedule(30000);
+    }
+    this.busy = false;
+    if (this.pending) { this.pending = false; this.schedule(500); }
+  },
+  start() { clearInterval(this.poll); if (!this.isOn()) return; this.poll = setInterval(() => { if (document.visibilityState === "visible") this.run(); }, 30000); this.schedule(300); },
+  stop() { clearInterval(this.poll); clearTimeout(this.timer); this.token = ""; this.key = null; this.files = {}; this.set("off"); },
+  async turnOn() {                                       // must be called from a tap
+    await this.connect("consent");
+    localStorage.setItem(this.onKey(), "1");
+    this.start(); await this.run();
+  },
+  turnOff() { try { localStorage.removeItem(this.onKey()); } catch (e) {} this.stop(); },
+  /* RESET ALL with "also erase the synced copy": delete every file in the hidden app folder */
+  async wipeCloud() { const files = await this.list(); for (const f of Object.values(files)) await this.api(`${DRIVE}/${f.id}`, { method: "DELETE" }); },
+  async tap() { try { await this.connect(""); this.set("syncing", "Syncing…"); await this.run(); } catch (e) { this.set("tap", "Couldn't connect to Google. Tap ☁️ to try again."); } },
+};
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && Sync.isOn()) Sync.schedule(800); });
+function useSync() { const [, f] = useState(0); useEffect(() => { const h = () => f(x => x + 1); Sync.listeners.add(h); return () => Sync.listeners.delete(h); }, []); return Sync; }
+
 const safeName = s => String(s).replace(/[\u2013\u2014]/g, "-").replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim();
 /* every saved image as { path, blob }: JordynAI Answer Sheets/<Grade – Section>/<Term> <Exam> <Subject>/<code>.jpg + <code>_name.jpg */
 async function allSheetFiles(prefix = "") {
@@ -1710,6 +1847,48 @@ function RecoveryShow({ code, onDone }) {
   );
 }
 
+/* ☁️ status in the top bar: one tap reconnects (iPhone Safari needs a tap for the Google window) */
+function SyncBadge() {
+  const S = useSync();
+  if (!S.isOn()) return null;
+  const t = S.lastOk ? new Date(S.lastOk).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  const look = { ok: ["☁️ Synced " + t, "text-emerald-300"], syncing: ["☁️ Syncing…", "text-cyan-300"], tap: ["☁️ Tap to sync", "text-amber-300 font-bold animate-pulse"], error: ["☁️ Sync problem", "text-red-300"], off: ["☁️ …", "text-slate-400"] }[S.state] || ["☁️", ""];
+  return <button onClick={() => (S.state === "tap" || S.state === "error" || !S.hasToken()) ? S.tap() : S.run()} title={S.msg} className={`hover:underline ${look[1]}`}>{look[0]}</button>;
+}
+/* New device, empty history: offer to bring the data from the teacher's other device first */
+function SyncJoinBanner() {
+  const [busy, setBusy] = useState(false), [err, setErr] = useState("");
+  return ReactDOM.createPortal(<div className="fixed top-3 left-1/2 -translate-x-1/2 z-[120] w-[min(94vw,520px)] rounded-2xl border border-sky-400/50 bg-slate-900/95 p-4 shadow-2xl">
+    <p className="text-sm text-white font-bold">☁️ Already using JordynAI on your MacBook or iPhone?</p>
+    <p className="text-xs text-slate-300 mt-1">Turn on sync to bring your classes, learners, keys and results here from your other device (same Gmail). No need to fill the profile again.</p>
+    <button disabled={busy} onClick={async () => { setBusy(true); setErr(""); try { await Sync.turnOn(); } catch (e) { setErr("Google didn't give permission (" + e.message + "). Allow pop-ups and try again."); } setBusy(false); }} className="mt-2 px-4 py-2 rounded-lg bg-sky-500 text-slate-950 font-black text-sm disabled:opacity-50">{busy ? "Bringing your data…" : "☁️ Turn on sync on this device"}</button>
+    {err && <p className="text-xs text-red-300 mt-1">{err}</p>}
+  </div>, document.body);
+}
+/* Security card section: turn device sync on/off */
+function SyncCard() {
+  const S = useSync(); const [busy, setBusy] = useState(false), [err, setErr] = useState("");
+  if (!S.available()) return null;
+  const on = S.isOn();
+  const go = async () => { setBusy(true); setErr(""); try { await S.turnOn(); } catch (e) { setErr("Google didn't give permission (" + e.message + "). Allow pop-ups for this site and try again."); } setBusy(false); };
+  return <div className="mt-5 rounded-xl border border-sky-400/30 bg-sky-500/10 p-3">
+    <h4 className="font-black text-white">☁️ Sync this device with your other devices</h4>
+    <p className="text-xs text-slate-300 mt-1">Signed in as <b>{Acct.hint}</b>. Your classes, learner lists, answer keys, results, history, sheet photos and name strips are kept in a <b>hidden app folder in your own Google Drive</b>, so your MacBook and iPhone stay the same. The app can only see its own hidden folder, never your other Drive files.</p>
+    {on ? <>
+      <p className="text-sm mt-2">{S.state === "ok" ? "✅ " : S.state === "error" ? "⚠️ " : "☁️ "}{S.msg || "On"}{S.lastOk ? ` · last synced ${new Date(S.lastOk).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}</p>
+      <div className="flex flex-wrap gap-2 mt-2">
+        <button onClick={() => S.hasToken() ? S.run() : S.tap()} className="px-3 py-1.5 text-xs rounded-lg bg-sky-500 text-slate-950 font-bold">🔄 Sync now</button>
+        <button onClick={() => S.turnOff()} className="px-3 py-1.5 text-xs rounded-lg bg-white/10">Turn off sync on this device</button>
+      </div>
+      <p className="text-[11px] text-slate-400 mt-2">Changes go up a few seconds after you save. The other device picks them up when you open the app, or within about 30 seconds while it's open. If both devices change the same exam at the same time, the later save wins.</p>
+    </> : <>
+      <button disabled={busy} onClick={go} className="mt-2 px-4 py-2 rounded-lg bg-sky-500 text-slate-950 font-black disabled:opacity-50">{busy ? "Connecting…" : "☁️ Turn on sync on this device"}</button>
+      <p className="text-[11px] text-slate-400 mt-2">Do this on each device you want in sync (your MacBook and your iPhone), signed in with the same Gmail. A borrowed computer stays separate unless you turn it on there.</p>
+    </>}
+    {err && <p className="text-xs text-red-300 mt-2">{err}</p>}
+    {S.state === "error" && /Drive API/.test(S.msg) && <p className="text-xs text-amber-200 mt-2">The school admin must switch on "Google Drive API" once in Google Cloud for this website.</p>}
+  </div>;
+}
 function Gate({ children }) {
   const [phase, setPhase] = useState("loading");      // loading | signin | legacy | setup | locked | recovery | open
   const [mode, setMode] = useState("password");       // password | recovery | admin
@@ -1729,6 +1908,19 @@ function Gate({ children }) {
     setPhase("signin");
   })(); }, []);
 
+  // device sync: runs while this email's data is open; other devices' changes refresh the app (never mid-scan)
+  const [appKey, setAppKey] = useState(0);
+  useEffect(() => {
+    if (phase !== "open" || store.db || !Sync.available()) return;
+    Sync.start();
+    let waiting = null;
+    const onSynced = () => {
+      const apply = () => { if (window.__jordynBusy > 0) { waiting = setTimeout(apply, 2000); return; } setAppKey(x => x + 1); };
+      clearTimeout(waiting); apply();
+    };
+    window.addEventListener("jordynai-synced", onSynced);
+    return () => { clearTimeout(waiting); window.removeEventListener("jordynai-synced", onSynced); Sync.stop(); };
+  }, [phase]);
   // auto-lock after 15 minutes without activity
   useEffect(() => {
     if (phase !== "open" || store.db) return;
@@ -1792,12 +1984,13 @@ function Gate({ children }) {
   if (phase === "open") return <>
     {!store.db && <div className="bg-slate-950/80 border-b border-white/10 text-xs text-slate-300 flex items-center justify-end gap-3 px-4 py-1.5">
       <span>👤 {Acct.hint || "This device"}</span>
+      {Sync.available() && <SyncBadge />}
       <button onClick={lockNow} className="text-cyan-300 hover:underline">🔒 Lock</button>
       {Acct.id && <button onClick={switchAccount} className="text-cyan-300 hover:underline">⇄ Switch account</button>}
     </div>}
     {!store.db && <RandomHumanCheck />}
     {byAdmin && <div className="bg-amber-500/20 border-b border-amber-400/40 text-amber-100 text-xs text-center p-2">Unlocked with the {Vault.unlockedBy === "admin" ? "admin master password" : "recovery code"}. Set a new password in History → Security.</div>}
-    {children}
+    <React.Fragment key={appKey}>{children}</React.Fragment>
   </>;
   if (phase === "recovery") return <GateShell><RecoveryShow code={code} onDone={() => { setCode(""); setPhase("open"); }} /></GateShell>;
   if (phase === "signin") {
@@ -1917,6 +2110,7 @@ function SecurityCard({ flash, saveFile }) {
       </div>
       <button disabled={busy} onClick={change} className="mt-2 px-4 py-2 text-sm rounded-lg bg-cyan-500 text-slate-950 font-bold disabled:opacity-40">Change password</button>
       {msg && <p className="text-xs text-slate-300 mt-1">{msg}</p>}</>}
+      <SyncCard />
       <div className="mt-5 rounded-xl border border-amber-400/40 bg-amber-400/5 p-3">
         <h4 className="text-sm font-black text-amber-200">👑 Admin only: create the admin master key</h4>
         <p className="text-xs text-slate-400 mt-2">Choose your admin master password (12+ characters). The app creates <b>admin-key.json</b>, which lets every device add an admin lock that only your master password opens. The password itself is never saved. If you lose it, make a new key; devices update on their next unlock.</p>
@@ -2273,11 +2467,16 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
   const deleteHist = async id => { const h = history.filter(x => x.id !== id); setHistory(h); await store.set("history", h); };
 
   const [resetBusy, setResetBusy] = useState(false);
-  const [humanOk, setHumanOk] = useState("");   // Cloudflare Turnstile token for RESET ALL
+  const [humanOk, setHumanOk] = useState("");
+  const [wipeCloud, setWipeCloud] = useState(false);   // RESET ALL: also erase the synced copy in Google Drive   // Cloudflare Turnstile token for RESET ALL
   const [blankPages, setBlankPages] = useState(1);
   const [blankBusy, setBlankBusy] = useState("");
   const resetAll = async () => {
     setResetBusy(true);
+    if (Sync.isOn()) {                                     // never let the cloud copy refill this device after a reset
+      if (wipeCloud) { try { if (!Sync.hasToken()) await Sync.connect(""); await Sync.wipeCloud(); } catch (e) { setResetBusy(false); flash("Couldn't erase the synced copy in Google Drive (" + e.message + "). Nothing was erased. Try again."); return; } }
+      Sync.turnOff();
+    }
     const keys = ["profile", "config", "key", "keySaved", "classes", "history", "passMark", "passMarkV2", "sessionStudents", "sessionAbsent", ...classes.map(rosterKey)];
     let ok = true;
     for (const k of keys) { if (!(await store.set(k, null))) ok = false; }
@@ -2608,6 +2807,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
       </div>
 
       {/* ===== MODALS ===== */}
+      {modal === "profile" && !profile.configured && Sync.available() && !Sync.isOn() && Acct.id && <SyncJoinBanner />}
       {modal === "profile" && <ProfileModal initial={profile} onSave={saveProfile} onClose={() => setModal(null)} />}
       {modal === "keyPrompt" && <Modal onClose={() => setModal(null)}>
         <div className="text-center"><div className="text-4xl mb-2">🔑</div>
@@ -2675,6 +2875,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
           <p className="text-xs text-slate-400 mb-4">school profile · {classes.length} saved class(es) and their learner lists · answer key and exam settings · {history.length} finalized session(s) in History</p>
           <p className="text-xs text-amber-200 mb-1">This cannot be undone. Download the CSVs you need from History first.</p>
           {!store.db && Acct.hint && <p className="text-xs text-slate-400">Only <b>{Acct.hint}</b> on this device is erased. Other emails stay.</p>}
+          {!store.db && Sync.isOn() && <label className="flex items-start gap-2 text-xs text-slate-200 my-2"><input type="checkbox" checked={wipeCloud} onChange={e => setWipeCloud(e.target.checked)} className="mt-0.5" /><span><b>Also erase the synced copy in Google Drive.</b> Your other devices will be emptied too the next time they sync. Leave unticked to erase only this device (sync turns off here).</span></label>}
           {!store.db && <HumanCheck onPass={setHumanOk} />}
           <div className="flex gap-3">
             <button disabled={resetBusy || (!store.db && !humanOk)} onClick={resetAll} className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold disabled:opacity-50">{resetBusy ? "Erasing…" : "Yes, erase everything"}</button>

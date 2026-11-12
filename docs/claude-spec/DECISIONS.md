@@ -2,6 +2,9 @@
 
 Decisions by Joven R. Castro, recorded by Claude. Each one overrides any older plan or code.
 
+## 2026-11-12
+- MacBook-iPhone sync through the teacher's own Google Drive hidden app folder (not GitHub, not Firebase Storage). Opt-in per device; lock = Google sign-in only (sync key kept in the same hidden folder); everything syncs, including photos.
+
 ## 2026-11-11
 - First real-paper test: 1 of 20 saved. Scanner fixed for cluttered desks, tilt and glare (SPEC 7.5). Guided scan flow adopted: suggested order (any code accepted), Mark absent, short honest loading, full names stay on the device; reports show the written-name strip.
 

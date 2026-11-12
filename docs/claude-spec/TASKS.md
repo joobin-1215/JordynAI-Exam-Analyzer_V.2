@@ -90,5 +90,9 @@ Android: print learner names on named sheets; "Print Extra Sheets" with 4 learne
 Port squareness-ranked corner candidates, the 4-blob combination search with its shape rules, centrality pick, row-local black thresholds, glare/blank flagging and sure-or-null CODE dots; guided order, check/X with sound and name strip, duplicate block, Mark absent, Take a break, Finalize button + short loading. reference/web-app-reference.html is the source of truth.
 **Checks:** the owner's real photos and the 23-condition stress set: 0 wrong answers, 0 wrong codes.
 
+## T20. Device sync (SPEC 7.6)
+Android: same Drive appDataFolder format (jordynai-synckey.json, jordynai-data.bin, img-<hash>) so the phone app, website and MacBook share one copy. Use Google Identity / AuthorizationClient for the drive.appdata scope with the EXISTING OAuth setup (no package/SHA-1/Firebase change). Opt-in per device, newest-change-wins merge, tombstones, photo sync, never refresh mid-scan.
+**Checks:** website and Android see each other's classes, rosters, results and photos.
+
 ---
 When all tasks are done, tell the owner, and ask Claude to update `SPEC.md` / `DECISIONS.md` if anything had to differ.
