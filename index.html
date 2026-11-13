@@ -232,9 +232,13 @@ function drawSheetCell(pen, o, learner, ox, oy) {
     pen.line(lx, Y(y + 0.6), X(x2), Y(y + 0.6), 0.15, "#000");
     if (printed) pen.text(printed, lx + 0.8, Y(y - 0.2), 6, { bold: true });
   };
-  // Name line: printed for named sheets (from the class list on this device); blank sheets are written by hand
+  // Small LAST NAME label for handing out (first name added when two learners share a last name). It sits in the free strip
+  // between the two top corner squares, above the header: away from the corners, CODE box/dots, grade mark, bubbles and paper probes.
+  if (!isKey && learner.label) { const lb = up(learner.label); let lpt = 5.6; while (lpt > 3.6 && pen.width(lb, lpt) * 1.1 > 66) lpt -= 0.2;
+    pen.text(lb, X(52.5), Y(5.9), lpt, { align: "center", bold: true }); }
+  // Name line: left blank on every learner sheet (the learner writes the full name); only the KEY sheet is labelled
   { const label = "Name:", lx = X(6) + pen.width(label, 6.2) + 1, room = X(76) - lx - 1.6;
-    const nm = isKey ? "TEACHER'S ANSWER KEY" : up(learner.name || "");
+    const nm = isKey ? "TEACHER'S ANSWER KEY" : "";
     let pt = 6.4; while (nm && pt > 4.2 && pen.width(nm, pt) * 1.08 > room) pt -= 0.2;
     pen.text(label, X(6), Y(23), 6.2); pen.line(lx, Y(23.6), X(76), Y(23.6), 0.15, "#000");
     if (nm) pen.text(nm, lx + 0.8, Y(22.8), pt, { bold: true }); }
@@ -252,7 +256,7 @@ function drawSheetCell(pen, o, learner, ox, oy) {
     if (bits) bits.forEach((bit, i) => pen.rect(X(D.x0 + i * D.step), Y(D.y), D.size, D.size, bit ? { fill: "#000" } : { stroke: "#000", lw: 0.15 }));
   }
   pen.text("Shade the circle of your answer FULLY and darkly. Use a pencil or black pen. One answer per number.", X(52.5), Y(41.3), 4.8, { align: "center" });
-  pen.text(blank ? "No check or X marks. Write your NAME and your CODE (ask your teacher)." : (learner.name ? "No check or X marks. Make sure the NAME and CODE on this sheet are yours." : "No check or X marks. Write your NAME (Last, First) on the Name line."), X(52.5), Y(43.4), 4.8, { align: "center" });
+  pen.text(blank ? "No check or X marks. Write your NAME and your CODE (ask your teacher)." : (learner.name || learner.label ? "No check or X marks. Write your FULL NAME on the Name line. Make sure the CODE is yours." : "No check or X marks. Write your NAME (Last, First) on the Name line."), X(52.5), Y(43.4), 4.8, { align: "center" });
   const fs = Math.max(4.6, Math.min(9, L.b * 1.45)), nf = Math.max(5.4, Math.min(10, L.b * 1.7));
   for (let c = 0; c < L.cols; c++) {
     const start = c * L.rows + 1; if (start > o.n) break;
@@ -606,14 +610,15 @@ function readGradeMark(G, map, paper) {
 /* Read a whole sheet. n = items on the sheet. */
 function readSheet(src, n) {
   const loc = locateSheet(src, n);
-  if (!loc) return { ok: false, reason: "corners" };
+  if (!loc) return { ok: false, reason: "corners", diag: { stage: "locate" } };
   const { G, map, paper } = loc;
   const cornerInk = CORNER_MM.map(([x, y]) => patchMedian(G, map, x, y, 0.8));
-  if (cornerInk.some(v => v > paper * 0.6)) return { ok: false, reason: "corners" };
+  const locDiag = { photo: [G.W, G.H], locScore: loc.score, locRing: loc.ring, locGap: loc.gap, paper, cornerInk };   // numbers only, for the scan log
+  if (cornerInk.some(v => v > paper * 0.6)) return { ok: false, reason: "corners", diag: { stage: "cornerInk", ...locDiag } };
   const { L, centers } = bubbleCenters(n), r = L.b / 2;
   // layout check: printed bubble outlines must be where we expect them (every row, banded radii)
   const ringScore = ringScoreAt(G, map, n, paper, 1), gapScore = gapScoreAt(G, map, n, paper, 1);
-  if (ringScore < 0.22 && gapScore < 0.45) return { ok: false, reason: "corners" };            // not a sheet at all
+  if (ringScore < 0.22 && gapScore < 0.45) return { ok: false, reason: "corners", diag: { stage: "notSheet", ringScore, gapScore, ...locDiag } };            // not a sheet at all
   let altRing = 0;                                      // was this sheet printed for a DIFFERENT item count?
   if (ringScore < 0.75) for (const n2 of [10, 15, 20, 25, 30, 40, 45, 50, 60, 75, 100]) {
     if (n2 === n) continue;
@@ -654,7 +659,8 @@ function readSheet(src, n) {
   const codeSure = dotFill.every(f => f < 0.3 || f > 0.7);                   // half-dark dots = unsure: never guess a code
   const code = codeSure ? bitsToCode(bits) : null;
   const { sheetGrade, gradeMark } = readGradeMark(G, map, paper);
-  return { ok: true, answers, flagged, fills, code, codeSure, bits, sheetGrade, gradeMark, ringScore, gapScore, layoutOk: ringScore > 0.3 && gapScore > 0.5 && !(altRing > ringScore * 1.25 && altRing > 0.45), paper, map, G, pts: loc.pts };
+  const diag = { stage: "read", ...locDiag, altRing, codeBoxPaper, dotInk, dotThr, dotFill };
+  return { ok: true, diag, answers, flagged, fills, code, codeSure, bits, sheetGrade, gradeMark, ringScore, gapScore, layoutOk: ringScore > 0.3 && gapScore > 0.5 && !(altRing > ringScore * 1.25 && altRing > 0.45), paper, map, G, pts: loc.pts };
 }
 /* Straightened 1050 x 1485 crop (for thumbnails and the Claude backup). */
 function warpCrop(res, ppm = 5, x0 = 0, y0 = 0, x1 = GEO.W, y1 = GEO.H) {
@@ -680,6 +686,27 @@ const VAULT_KEY = "jordynai_vault";            // legacy (before accounts): one 
 const ACCTS_KEY = "jordynai_accounts";
 const CFG = Object.assign({ googleClientId: "", turnstileSiteKey: "" }, window.JORDYNAI_CONFIG || {});
 const TURNSTILE_TEST_KEY = "1x00000000000000000000AA";   // Cloudflare's public test key (always passes)
+/* APP VERSION: raise this number with every update. The website checks the file on the server (never the cached copy);
+   if the server has a newer version, the page reloads once by itself (only right after opening) or shows a Reload bar. */
+const APP_VERSION = 2026111303;
+const newerVersionIn = (html, cur) => { const m = String(html || "").match(/const APP_VERSION = (\d+);/); return m && +m[1] > cur ? +m[1] : 0; };
+(() => {
+  if (!CFG.googleClientId || !/^https?:$/.test(location.protocol) || window.claude) return;      // website only (not inside Claude)
+  const t0 = Date.now();
+  fetch(location.pathname + "?v=" + t0, { cache: "no-store" }).then(r => (r.ok ? r.text() : "")).then(html => {
+    const nv = newerVersionIn(html, APP_VERSION); if (!nv) return;
+    let tried = ""; try { tried = sessionStorage.getItem("jordynai_reload_for") || ""; } catch (e) {}
+    if (tried !== String(nv) && Date.now() - t0 < 6000 && !(window.__jordynBusy > 0)) {        // just opened: reload once, quietly
+      try { sessionStorage.setItem("jordynai_reload_for", String(nv)); } catch (e) {}
+      location.replace(location.pathname + "?v=" + nv + location.hash); return;
+    }
+    const bar = document.createElement("div");
+    bar.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;background:#f59e0b;color:#0f172a;font:700 14px Inter,sans-serif;padding:10px;text-align:center";
+    bar.innerHTML = 'A new version of the app is ready. <button style="margin-left:8px;padding:4px 12px;border-radius:8px;background:#0f172a;color:#fff">Reload</button>';
+    bar.querySelector("button").onclick = () => location.replace(location.pathname + "?v=" + nv);
+    document.body.appendChild(bar);
+  }).catch(() => {});
+})();
 const maskEmail = e => { const [u, d] = String(e).split("@"); return (u.length <= 2 ? u[0] + "•" : u.slice(0, 2) + "•••") + "@" + (d || ""); };
 const Acct = {
   id: "", email: "", hint: "", via: "",
@@ -846,6 +873,7 @@ const imgStore = {
   },
   key: (m, code) => [m.gradeSection, m.term, m.slot, m.subject, code].join("|"),
   async put(meta, code, sheet, name) { try { const rec = { sheet: await this.seal(sheet), name: name ? await this.seal(name) : null, meta: { ...meta, code }, at: Date.now() }; await this.tx("readwrite", st => st.put(rec, this.key(meta, code))); Sync.stampImg(this.key(meta, code)); return true; } catch (e) { return false; } },
+  async del(k) { try { await this.tx("readwrite", st => st.delete(k)); return true; } catch (e) { return false; } },
   async get(k) { try { const rec = await this.tx("readonly", st => st.get(k)); if (!rec) return null; return { sheet: await this.unseal(rec.sheet), name: await this.unseal(rec.name), meta: rec.meta }; } catch (e) { return null; } },
   async keys(prefix = "") { try { return (await this.tx("readonly", st => st.getAllKeys())).filter(k => String(k).startsWith(prefix)); } catch (e) { return []; } },
   async wipe() { try { const n = this.dbName(); this.close(); await new Promise(r => { const rq = indexedDB.deleteDatabase(n); rq.onsuccess = rq.onerror = rq.onblocked = () => r(); }); } catch (e) {} },
@@ -882,6 +910,24 @@ const SYNC_REDIRECT = location.origin + location.pathname;                      
 const DRIVE = "https://www.googleapis.com/drive/v3/files", DRIVE_UP = "https://www.googleapis.com/upload/drive/v3/files";
 const b64e = u8 => btoa(String.fromCharCode(...u8));
 const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+/* Merge another device's copy into this one (changes local and M.t in place, returns the changed keys).
+   The newer change wins for each item. Grade spaces (ws_*, activeGrade, wsIndex) are never lost to an older app version:
+   an older app (before grade spaces) only knows the old single keys, so it can never send a newer tombstone for them,
+   and when this copy has grade spaces the old single keys it sends are ignored at launch (see launchStore). */
+function syncMerge(local, M, remote) {
+  const changed = [], size = v => (v == null ? 0 : JSON.stringify(v).length), rmap = remote.map || {};
+  const keys = new Set([...Object.keys(remote.t || {}), ...Object.keys(M.t)]);
+  for (const k of keys) {
+    const rt = (remote.t || {})[k] || 0, lt = M.t[k] || 0;
+    // real edits (time > 1) beat older ones. Items saved before sync (time 1) on BOTH sides: keep the one with more in it,
+    // so an empty new device can never wipe a device that already has classes, scans or results.
+    const takeRemote = rt > 1 ? rt > lt : (rt === 1 && lt <= 1 && size(rmap[k]) > size(local[k]));
+    if (takeRemote) { if (k in rmap) local[k] = rmap[k]; else delete local[k]; M.t[k] = rt; changed.push(k); }
+  }
+  // items saved before sync was turned on get time 1 ("old")
+  Object.keys(local).forEach(k => { if (k !== "__sync" && !(k in M.t)) M.t[k] = 1; });
+  return changed;
+}
 const Sync = {
   token: "", tokenExp: 0, key: null, files: {}, lastData: "", busy: false, timer: null, poll: null, pending: false,
   state: "off", msg: "", lastOk: 0, listeners: new Set(),
@@ -907,7 +953,10 @@ const Sync = {
     if (turnOn) sessionStorage.setItem("jordynai_sync_join", Acct.id);
     const q = new URLSearchParams({ client_id: CFG.googleClientId, redirect_uri: SYNC_REDIRECT, response_type: "token", scope: SYNC_SCOPE, include_granted_scopes: "true", state, prompt: turnOn ? "consent" : "none" });
     if (Acct.email) q.set("login_hint", Acct.email);
-    location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + q;
+    // the return address must match Google's setting exactly (no ?v=), so refresh the browser's saved copy of this page first:
+    // coming back then loads the CURRENT app, not an older cached one
+    const go = () => { location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + q; };
+    Promise.race([fetch(SYNC_REDIRECT, { cache: "reload" }).catch(() => {}), new Promise(r => setTimeout(r, 2500))]).then(go, go);
   },
   /* the token must belong to the Gmail signed in to the app (never sync into someone else's Drive) */
   async checkOwner() {
@@ -973,17 +1022,8 @@ const Sync = {
       let remote = { map: {}, t: {}, imgs: {} };
       if (this.files["jordynai-data.bin"]) remote = await this.open(await this.download("jordynai-data.bin"));
       // merge: the newer change wins for each item
-      const changed = [], size = v => (v == null ? 0 : JSON.stringify(v).length);
-      const keys = new Set([...Object.keys(remote.t || {}), ...Object.keys(M.t)]);
-      for (const k of keys) {
-        const rt = (remote.t || {})[k] || 0, lt = M.t[k] || 0;
-        // real edits (time > 1) beat older ones. Items saved before sync (time 1) on BOTH sides: keep the one with more in it,
-        // so an empty new device can never wipe a device that already has classes, scans or results.
-        const takeRemote = rt > 1 ? rt > lt : (rt === 1 && lt <= 1 && size(remote.map[k]) > size(local[k]));
-        if (takeRemote) { if (k in remote.map) local[k] = remote.map[k]; else delete local[k]; M.t[k] = rt; changed.push(k); }
-      }
-      // items saved before sync was turned on get time 1 ("old")
-      Object.keys(local).forEach(k => { if (k !== "__sync" && !(k in M.t)) M.t[k] = 1; });
+      const size = v => (v == null ? 0 : JSON.stringify(v).length);
+      const changed = syncMerge(local, M, remote);
       let needUp = false;
       for (const k of Object.keys(M.t)) {
         const rt = (remote.t || {})[k] || 0;
@@ -1461,9 +1501,94 @@ function LiveScanner({ n, onResult, onClose }) {
   );
 }
 
+/* ===================== SCAN LOG for YAL (to diagnose misread sheets) ===================== */
+/* Privacy: numbers only (dot fill values, scores, flagged item numbers), codes, times, grade/section.
+   NEVER learner names, photos or the handwritten name strip. Kept on this device (last 500 scans); the admin saves it as a file. */
+const SCANLOG_KEY = "jordynai_scanlog", SCANLOG_MAX = 500;
+const r3 = v => (typeof v === "number" && Number.isFinite(v) ? Math.round(v * 1000) / 1000 : v);
+const rArr = a => (Array.isArray(a) ? a.map(r3) : a);
+function scanLogEntry(res, ctx) {
+  const d = (res && res.diag) || {};
+  const e = { id: ctx.id, t: new Date(ctx.t || Date.now()).toISOString(), grade: ctx.grade || "", section: ctx.section || "", items: ctx.n, src: ctx.src || "", ok: !!(res && res.ok), stage: d.stage || (res && res.reason) || "" };
+  if (d.photo) e.photo = d.photo;
+  ["locScore", "locRing", "locGap", "paper", "altRing", "codeBoxPaper", "dotInk", "dotThr", "ringScore", "gapScore"].forEach(k => { if (d[k] != null) e[k] = r3(d[k]); });
+  if (d.cornerInk) e.cornerInk = rArr(d.cornerInk);
+  if (d.dotFill) e.dotFill = rArr(d.dotFill);
+  if (res && res.ok) {
+    Object.assign(e, { codeRead: res.code || "", codeSure: !!res.codeSure, bits: res.bits, ringScore: r3(res.ringScore), gapScore: r3(res.gapScore), layoutOk: !!res.layoutOk,
+      sheetGrade: res.sheetGrade || "", gradeMark: res.gradeMark || "", flagged: (res.flagged || []).slice(), answered: (res.answers || []).filter(Boolean).length });
+    e.flaggedFills = Object.fromEntries((res.flagged || []).map(q => [q, rArr((res.fills || [])[q - 1] || [])]));
+  }
+  return e;
+}
+const scanLogPush = (list, entry, max = SCANLOG_MAX) => [...(Array.isArray(list) ? list : []), entry].slice(-max);
+const scanLogPatch = (list, id, p) => (Array.isArray(list) ? list : []).map(e => (e && e.id === id ? { ...e, ...p } : e));
+const ScanLog = {
+  read() { try { const v = JSON.parse(localStorage.getItem(SCANLOG_KEY) || "[]"); return Array.isArray(v) ? v : []; } catch (e) { return []; } },
+  write(l) { try { localStorage.setItem(SCANLOG_KEY, JSON.stringify(l)); } catch (e) { try { localStorage.setItem(SCANLOG_KEY, JSON.stringify(l.slice(-100))); } catch (e2) {} } },
+  add(entry) { this.write(scanLogPush(this.read(), entry)); },
+  patch(id, p) { if (id) this.write(scanLogPatch(this.read(), id, p)); },
+  clear() { try { localStorage.removeItem(SCANLOG_KEY); } catch (e) {} },
+};
+/* Admin check for the "Send log to YAL" button: the repo is public, so only SHA-256 hashes of the two admin emails are here. */
+const ADMIN_HASHES = ["9350b386529cd738cf6ce82a2578bb2be3051142d166c0e37c610986845f0787", "020628dbd920a499ef5786bb6124de67f4a18a7e9102bbff34fd060cae247d37"];
+async function sha256Hex(s) { const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s))); return Array.from(h, b => b.toString(16).padStart(2, "0")).join(""); }
+async function isAdminEmail(email) { if (!email) return false; try { return ADMIN_HASHES.includes(await sha256Hex("jordynai-admin|" + String(email).trim().toLowerCase())); } catch (e) { return false; } }
+/* Blank sheet = NO item shaded at all (no answer and no unclear mark). The KEY sheet is never treated as blank. */
+const isBlankSheet = res => !!(res && res.ok && res.layoutOk && res.code !== "KEY" && Array.isArray(res.answers) && res.answers.every(a => !a) && !(res.flagged || []).length);
+/* Small label printed at the top of each named sheet: LAST NAME, plus the given name when two learners in the class share it. */
+function sheetLabels(rs) {
+  const all = [...((rs && rs.boys) || []).map((v, i) => v && [`B-${i + 1}`, v]), ...((rs && rs.girls) || []).map((v, i) => v && [`G-${i + 1}`, v])].filter(Boolean);
+  const ln = v => String(v).split(",")[0].trim(), cnt = {};
+  all.forEach(([, v]) => { const l = up(ln(v)); cnt[l] = (cnt[l] || 0) + 1; });
+  const out = {};
+  all.forEach(([c, v]) => { const given = String(v).split(",").slice(1).join(" ").trim().replace(/\s+[A-Za-zÑñ]\.?$/, "");
+    out[c] = cnt[up(ln(v))] > 1 && given ? `${ln(v)}, ${given}` : ln(v); });
+  return out;
+}
+/* NO LONGER IN SCHOOL (NLS): the name leaves the class list (and so every list, report and statistic), but the code stays
+   RESERVED: the slot stays empty and is never refilled, so no other code shifts and no sheet needs reprinting.
+   The name is kept hidden in rs.nls so Undo can put it back. Like the rest of the class list, it stays on this device
+   (and in the teacher's OWN Google Drive if device sync is on); it is never sent to Claude.
+   NLS is refused while the learner has a scanned sheet in the current exam, so a real score is never deleted. */
+const nlsAllowed = (code, scannedIds) => !!code && !(scannedIds && scannedIds.has(code));
+/* Saved sheet images of one learner in one class (every exam): their keys end with "|<code>". */
+const imgKeysOf = (keys, gradeSection, code) => (keys || []).filter(k => String(k).startsWith(gradeSection + "|") && String(k).endsWith("|" + code));
+/* Scanner class change. Same grade, other section: scans live in the GRADE's record, so saved scans would show under the
+   wrong section. "refuse" = saved scans exist (finish or clear them first); "confirm" = only unsaved sheets waiting (they
+   are cleared); "ok" = nothing to lose. Another grade: the grade switch has its own checks ("grade"). */
+/* Was this exam of this class finalized into History? (same class, term, exam slot and subject) */
+const isFinalized = (history, x) => (history || []).some(h => h && h.gradeSection === x.gradeSection && h.term === x.term && h.slot === x.slot && h.subject === x.subject);
+function sectionSwitchCheck(curGrade, curSection, label, saved, waiting) {
+  const [g, ...rest] = String(label).split(" – "), sec = rest.join(" – ");
+  if (g !== curGrade) return "grade";
+  if (sec === curSection) return "same";
+  return saved > 0 ? "refuse" : waiting > 0 ? "confirm" : "ok";
+}
+function rosterMarkNLS(rs, code) {
+  const m = /^([BG])-(\d+)$/.exec(String(code || "")); if (!rs || !m) return null;
+  const k = m[1] === "B" ? "boys" : "girls", i = +m[2] - 1, arr = (rs[k] || []).slice();
+  if (!arr[i]) return null;
+  const nls = { ...(rs.nls || {}), [code]: arr[i] }; arr[i] = "";
+  return { ...rs, [k]: arr, nls };
+}
+function rosterUndoNLS(rs, code) {
+  const m = /^([BG])-(\d+)$/.exec(String(code || "")); if (!rs || !m || !rs.nls || !(code in rs.nls)) return null;
+  const k = m[1] === "B" ? "boys" : "girls", i = +m[2] - 1, arr = (rs[k] || []).slice();
+  if (arr[i]) return null;
+  while (arr.length <= i) arr.push("");
+  arr[i] = rs.nls[code]; const nls = { ...rs.nls }; delete nls[code];
+  return { ...rs, [k]: arr, nls };
+}
+const nlsCodes = rs => Object.keys((rs && rs.nls) || {});
+
 /* ===================== SCANNER PANEL ===================== */
-function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absent, onAbsent, onUnabsent, gradeSection, onReport, grade, getGrade, onBusy, onWaiting }) {
+function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absent, onAbsent, onUnabsent, gradeSection, onReport, grade, getGrade, onBusy, onWaiting, section, nls, onNLS, onUndoNLS }) {
   const [paused, setPaused] = useState(false);
+  const [blankAsk, setBlankAsk] = useState(null);   // { item, code }: a sheet with NO item shaded: Absent, or No longer in school?
+  const logSave = (it, e) => { const typed = up(it.code).replace(/\s/g, "");              // the code read vs the code the teacher typed
+    ScanLog.patch(it.id, { edit: { read: it.codeRead || "", typed, changed: (it.codeRead || "") !== typed, itemsToCheck: it.flagged.length, saved: !e, why: e || "", t: new Date().toISOString() } }); };
+  const logScan = (id, res, src) => ScanLog.add(scanLogEntry(res, { id, grade, section: section || "", n, src }));   // numbers only: see SCAN LOG
   const [fx, setFx] = useState(null); const fxT = useRef(null);
   const fire = (ok, text, sub, sound = true, img = "") => {
     if (sound) (ok ? playBeep : playBuzz)();
@@ -1505,6 +1630,7 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absen
     }
     const m = c.match(/^([BG])-?(\d{1,2})$/); if (!m) return "Type a code like B-12 or G-3.";
     const id = `${m[1]}-${+m[2]}`, responses = {};
+    if ((nls || []).includes(id)) return `${id} is marked No longer in school. Not saved. Undo that first if it was a mistake.`;
     if (queue && queue.length && !queue.some(x => x.code === id)) return `${id} is not in ${gradeSection}'s class list. Check the sheet, or update the list in Class Setup.`;
     answers.forEach((a, i) => { responses[i + 1] = a || ""; });
     onStudent({ student_id: id, student_name: "", responses }); saveImages(id, it);
@@ -1514,7 +1640,8 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absen
 
   const handleResult = async (res, name, blob) => {
     const id = Math.random().toString(36).slice(2);
-    if (!res.ok) { fire(false, "SCAN UNSUCCESSFUL", "Couldn't see all 4 black corners. Rescan the SAME sheet: whole sheet in view, phone flat above it, good light."); setItems(l => [{ id, status: "align", msg: "Couldn't see all 4 black corners (one may be cut off, covered or in shadow).", blob, name }, ...l]); return; }
+    logScan(id, res, name === "live camera" ? "live" : "photo");                     // never the file name
+    if (!res.ok) { ScanLog.patch(id, { outcome: "corners" }); fire(false, "SCAN UNSUCCESSFUL", "Couldn't see all 4 black corners. Rescan the SAME sheet: whole sheet in view, phone flat above it, good light."); setItems(l => [{ id, status: "align", msg: "Couldn't see all 4 black corners (one may be cut off, covered or in shadow).", blob, name }, ...l]); return; }
     const crop = warpCrop(res, 5), thumb = crop.toDataURL("image/jpeg", 0.6);
     const sheetBlob = await canvasBlob(crop, 0.8);                                   // saved on the device as the learner's reference
     const nameC = warpCrop(res, 12, ...NAME_STRIP);                                  // the written name, also device-only
@@ -1523,22 +1650,32 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absen
     const cc = warpCrop(res, 8), cx = cc.getContext("2d"); cx.fillStyle = "#fff";    // copy for "Ask Claude": name blanked out
     cx.fillRect(NAME_STRIP[0] * 8, NAME_STRIP[1] * 8, (NAME_STRIP[2] - NAME_STRIP[0]) * 8, 6 * 8);
     const cropBlob = await canvasBlob(cc);
-    if (!res.layoutOk) { fire(false, "SCAN UNSUCCESSFUL", `This sheet doesn't match ${n} items. Rescan, or check the Items setting.`); setItems(l => [{ id, status: "error", thumb, cropBlob, sheetBlob, nameBlob, nameThumb, blob, name, code: res.code || "", answers: Array(n).fill(null), flagged: [], msg: `This sheet doesn't match ${n} items. Was it printed for a different number of items? Reprint, or use Ask Claude.` }, ...l]); return; }
+    if (!res.layoutOk) { ScanLog.patch(id, { outcome: "layout" }); fire(false, "SCAN UNSUCCESSFUL", `This sheet doesn't match ${n} items. Rescan, or check the Items setting.`); setItems(l => [{ id, status: "error", thumb, cropBlob, sheetBlob, nameBlob, nameThumb, blob, name, code: res.code || "", answers: Array(n).fill(null), flagged: [], msg: `This sheet doesn't match ${n} items. Was it printed for a different number of items? Reprint, or use Ask Claude.` }, ...l]); return; }
     const gc = gradeCheck(res.sheetGrade, res.gradeMark, grade);
     const gradeNote = gc === "old" ? `Older sheet with no grade mark: make sure it is a ${grade} sheet.` : gc === "unclear" ? `Grade mark unclear: look at the paper. Is it a ${grade} sheet?` : "";
-    const item = { id, thumb, cropBlob, sheetBlob, nameBlob, nameThumb, blob, name, code: res.code || "", answers: res.answers.slice(), flagged: res.flagged.slice(), sheetGrade: res.sheetGrade || "", gradeNote };
-    if (wrongGrade(item)) {                                                        // a Grade 7 sheet while checking Grade 8 (or the reverse): never recorded
+    const item = { id, thumb, cropBlob, sheetBlob, nameBlob, nameThumb, blob, name, code: res.code || "", codeRead: res.code || "", answers: res.answers.slice(), flagged: res.flagged.slice(), sheetGrade: res.sheetGrade || "", gradeNote };
+    if (wrongGrade(item)) {
+      ScanLog.patch(id, { outcome: "wrongGrade" });                                                        // a Grade 7 sheet while checking Grade 8 (or the reverse): never recorded
       fire(false, "WRONG GRADE LEVEL", `This is a ${item.sheetGrade} sheet. You are checking ${grade}. It was NOT saved. Put it with the ${item.sheetGrade} papers.`, true, nameThumb);
       setItems(l => [{ ...item, status: "review", msg: `This is a ${item.sheetGrade} sheet. You are checking ${grade}. Not saved. Rescan it after switching to ${item.sheetGrade} at the top.` }, ...l]);
       return;
     }
+    if (isBlankSheet(res)) {                                                      // NO item shaded: ask Absent or No longer in school
+      ScanLog.patch(id, { outcome: "blank" });
+      fire(false, "BLANK SHEET", "No item is shaded. Is this learner absent, or no longer in school?", true, nameThumb);
+      const it = { ...item, blank: true, status: "review", msg: "Blank sheet: no item is shaded. Tap Absent / No longer in school, or Remove." };
+      setLive(false); setItems(l => [it, ...l]); setBlankAsk({ item: it, code: res.code || "" });
+      return;
+    }
     const keyBlanks = res.code === "KEY" && res.answers.some(a => !a);
     const wasDup = res.code && res.code !== "KEY" && scannedIds && scannedIds.has(res.code);
+    ScanLog.patch(id, { outcome: wasDup ? "duplicate" : (res.code && !res.flagged.length && !keyBlanks && gc !== "unclear") ? "auto" : "review" });
     if (wasDup) {                                                                  // never overwrite silently
       fire(false, `${res.code} WAS ALREADY SCANNED`, "Not saved. If this is a fresh rescan of the same learner, tap Save in the list to replace the earlier one.", true, nameThumb);
       setItems(l => [{ ...item, status: "review", msg: `${res.code} was already scanned. Tap Save only to REPLACE the earlier scan.` }, ...l]);
     } else if (res.code && !res.flagged.length && !keyBlanks && gc !== "unclear") {
       const e = commit(item, res.code, res.answers);
+      ScanLog.patch(id, { outcome: e ? "refused" : "saved", why: e || "" });
       if (!e) { const who = res.code === "KEY" ? "" : ((queue || []).find(q => q.code === res.code) || {}).name || "";
         fire(true, `${res.code === "KEY" ? "ANSWER KEY" : res.code} SAVED`, [who ? `On your list: ${who} — check it matches the name on the sheet.` : "", gradeNote].filter(Boolean).join(" "), true, res.code === "KEY" ? "" : nameThumb); }
       else fire(false, "NOT SAVED", e, true, nameThumb);
@@ -1621,6 +1758,7 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absen
           <button onClick={() => { ensureAC(); onReport && onReport(); }} className="w-full mt-2 py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-lg shadow-lg">🚀 Finalize and Generate Report on {gradeSection}</button>
           <p className="text-[11px] text-slate-400 mt-1 text-center">Opens the Gradesheet. To lock it into History, use ✅ Finalize Session in Summary & CSV.</p>
         </>}
+        {(nls || []).length > 0 && <p className="text-[11px] text-slate-400 mt-2">No longer in school (code kept, tap to undo): {nls.map(c => <button key={c} onClick={() => onUndoNLS && onUndoNLS(c)} className="underline mr-2 hover:text-white" title="Undo: put back in the class list">{c} ↶</button>)}</p>}
         {absRows.length > 0 && <p className="text-[11px] text-slate-400 mt-2">Absent (tap to undo): {absRows.map(q => <button key={q.code} onClick={() => onUnabsent && onUnabsent(q.code)} className="underline mr-2 hover:text-white" title="Un-mark absent">{q.code} ✕</button>)}</p>}
       </div>}
 
@@ -1649,8 +1787,9 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absen
                         className={`w-5 h-5 rounded-full text-[9px] font-bold border ${(it.answers[q - 1] || "") === l ? "bg-cyan-400 text-slate-950 border-cyan-300" : "border-white/25 text-slate-300"}`}>{l || "–"}</button>)}</span>)}
                   </div>}
                   <div className="flex flex-wrap gap-2 mt-1">
-                    {it.status === "review" && !wrongGrade(it) && <button onClick={() => { const e = commit(it, it.code, it.answers); if (e) patch(it.id, { msg: e }); else patch(it.id, { status: "done", code: up(it.code), msg: "" }); }} className="px-3 py-1.5 text-xs rounded-lg bg-emerald-500 text-slate-950 font-bold">Save</button>}
-                    {it.status === "review" && wrongGrade(it) && <button onClick={() => { const ok = { ...it, gradeOk: true }, e = commit(ok, it.code, it.answers); if (e) patch(it.id, { gradeOk: true, msg: e }); else patch(it.id, { gradeOk: true, status: "done", code: up(it.code), msg: "" }); }} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 text-amber-200">{up(it.code) === "KEY" ? `This answer key really is for ${grade}: save anyway` : `It really is a ${grade} learner: save anyway`}</button>}
+                    {it.status === "review" && !wrongGrade(it) && <button onClick={() => { const e = commit(it, it.code, it.answers); logSave(it, e); if (e) patch(it.id, { msg: e }); else patch(it.id, { status: "done", code: up(it.code), msg: "" }); }} className="px-3 py-1.5 text-xs rounded-lg bg-emerald-500 text-slate-950 font-bold">Save</button>}
+                    {it.status === "review" && wrongGrade(it) && <button onClick={() => { const ok = { ...it, gradeOk: true }, e = commit(ok, it.code, it.answers); logSave(it, e); if (e) patch(it.id, { gradeOk: true, msg: e }); else patch(it.id, { gradeOk: true, status: "done", code: up(it.code), msg: "" }); }} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 text-amber-200">{up(it.code) === "KEY" ? `This answer key really is for ${grade}: save anyway` : `It really is a ${grade} learner: save anyway`}</button>}
+                    {it.blank && <button onClick={() => setBlankAsk({ item: it, code: it.code })} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 text-amber-200">Absent / No longer in school</button>}
                     {claudeOK && <button disabled={busyId === it.id} onClick={() => askClaude(it)} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 disabled:opacity-40">{busyId === it.id ? "Asking Claude…" : "Ask Claude"}</button>}
                     <button onClick={() => setItems(l => l.filter(x => x.id !== it.id))} className="px-3 py-1.5 text-xs rounded-lg bg-white/5 text-slate-400">Remove</button>
                   </div>
@@ -1663,6 +1802,33 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absen
       </>}
       {live && !paused && <LiveScanner n={n} onClose={() => setLive(false)} onResult={res => { setBusyN(x => x + 1); handleResult(res, "live camera", null).finally(() => setBusyN(x => x - 1)); }} />}
       <ScanFlash fx={fx} />
+      {blankAsk && (() => {
+        const c0 = up(blankAsk.code).replace(/\s/g, ""), m = c0.match(/^([BG])-?(\d{1,2})$/), code = m ? `${m[1]}-${+m[2]}` : "";
+        const inList = !!code && Q.some(q => q.code === code), it = blankAsk.item;
+        const done = (kind) => { ScanLog.patch(it.id, { blank: kind, blankCode: code, codeChanged: code !== (it.codeRead || "") }); setItems(l => l.filter(x => x.id !== it.id)); setBlankAsk(null); };
+        const err = !code ? "Type the learner's code (like B-5) from the sheet." : Q.length && !inList ? `${code} is not in ${gradeSection}'s class list.`
+          : !nlsAllowed(code, scannedIds) ? `${code} already has a scanned sheet in this exam. Check the code; nothing was changed.` : "";
+        return ReactDOM.createPortal(
+          <div className="fixed inset-0 z-[95] bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3">
+            <div className="glass-strong rounded-2xl p-5 w-full max-w-md">
+              <h3 className="text-lg font-black text-white">Blank sheet: no item is shaded</h3>
+              <p className="text-xs text-slate-400 mb-2">The name the learner wrote:</p>
+              <div className="flex gap-2 mb-3 items-start">
+                {it.thumb && <img src={it.thumb} alt="whole sheet" className="w-20 rounded bg-white shrink-0" style={{ aspectRatio: "1/1.414" }} />}
+                {it.nameThumb ? <img src={it.nameThumb} alt="written name" className="flex-1 min-w-0 max-h-20 object-contain rounded bg-white" /> : <p className="text-xs text-slate-500">(no name strip)</p>}
+              </div>
+              <div className="flex items-center gap-2 mb-1"><span className="text-xs text-slate-400">Code</span>
+                <input value={blankAsk.code} onChange={e => setBlankAsk({ ...blankAsk, code: up(e.target.value) })} placeholder="B-5" className="w-24 bg-slate-900/70 border border-white/15 rounded px-2 py-1 text-sm font-mono text-white" /></div>
+              {err ? <p className="text-xs text-amber-300 mb-2">{err}</p> : <p className="text-xs text-slate-500 mb-2"> </p>}
+              <div className="grid gap-2">
+                <button disabled={!!err} onClick={() => { onAbsent && onAbsent(code); done("absent"); }} className="py-3 rounded-xl bg-amber-400 text-slate-950 font-black disabled:opacity-40">🚫 Absent</button>
+                <button disabled={!!err || !inList} onClick={() => { onNLS && onNLS(code); done("nls"); }} className="py-3 rounded-xl bg-rose-500 text-white font-black disabled:opacity-40">🏫 No longer in school (NLS)</button>
+                <p className="text-[11px] text-slate-400">Absent: shown as absent, not counted in the mean, MPS or item analysis. Scan the learner's shaded sheet later and they count again.<br />NLS: the name is removed from the app and every report, and the learner's saved sheet pictures are deleted. The code stays reserved (never given to anyone else). You can undo it.</p>
+                <button onClick={() => setBlankAsk(null)} className="py-2 rounded-xl bg-white/10 text-sm">Not now (keep it in the list)</button>
+              </div>
+            </div>
+          </div>, document.body);
+      })()}
       {aligning && <SheetAligner file={aligning.blob} index={0} total={1}
         onDone={async b => { const it = aligning; setAligning(null); setItems(l => l.filter(x => x.id !== it.id)); fromFile(it.blob, b); }}
         onSkip={() => setAligning(null)} onCancel={() => setAligning(null)} />}
@@ -1786,6 +1952,10 @@ async function launchStore(st, { defaultConfig, made }) {
     if (rs.some(r => !r.ok)) return { err: true };
     legacy = { config: rs[0].value || defaultConfig, key: rs[1].value, keySaved: !!rs[2].value, students: rs[3].value || [], absent: rs[4].value || [] };
     GRADES.forEach((g, i) => { const v = rs[LEGACY_KEYS.length + i].value; if (v && v.config) { existing[g] = v; if (made) made.add(g); } });
+    // grade spaces were made before (shared list), yet none read back: never fall back to the old single keys
+    // (an older app on another device may have synced them in). Show Retry instead.
+    if (!Object.keys(existing).length) { const ix = await st.read("wsIndex"); if (!ix.ok) return { err: true };
+      if (Array.isArray(ix.value) && ix.value.some(g => GRADES.includes(g))) return { err: true, missing: ix.value.find(g => GRADES.includes(g)), classes, history }; }
   }
   const plan = planLoad({ ag, ws, legacy, classes, history, existing });
   if (plan.err) return { ...plan, classes, history };
@@ -1858,10 +2028,11 @@ const collator = new Intl.Collator("es", { sensitivity: "base" });   /* Spanish 
 const lastNameOf = nm => String(nm).split(",")[0].trim();
 const compareNames = (a, b) => collator.compare(lastNameOf(a), lastNameOf(b)) || collator.compare(a, b);
 /* Rows that break A–Z order or leave a gap between names -> Set of row indexes */
-function orderProblems(arr) {
+function orderProblems(arr, skip) {                // skip = Set of row indexes kept empty on purpose (No longer in school: code reserved)
   const bad = new Set(); let lastIdx = -1;
   const lastFilled = arr.reduce((m, v, i) => (v ? i : m), -1);
   arr.forEach((v, i) => {
+    if (skip && skip.has(i)) return;
     if (!v) { if (i < lastFilled) bad.add(i); return; }
     if (lastIdx >= 0 && compareNames(arr[lastIdx], v) > 0) { bad.add(lastIdx); bad.add(i); }
     lastIdx = i;
@@ -1880,6 +2051,9 @@ function RosterPage({ label, initial, onSave, onBack, onDownload, onCodeList, fl
   const [bad, setBad] = useState({ B: new Set(), G: new Set() });
   const [saved, setSaved] = useState(!!(initial && (initial.boys || []).some(Boolean)));
   const [extra, setExtra] = useState(["", "", "", ""]);   // Print Extra Sheets: up to 4 learners = 1 A4 page
+  const [nls, setNls] = useState((initial && initial.nls) || {});   // codes reserved for learners no longer in school (rows stay empty)
+  const resv = g => new Set(Object.keys(nls).filter(c => c[0] === g).map(c => idNum(c) - 1));
+  const freeRows = g => Array.from({ length: ROSTER_ROWS }, (_, i) => i).filter(i => !resv(g).has(i));
   const [grade, sec] = [String(label).split(" – ")[0], sectionOf(label)];
   const saveLabel = `Save Learners in ${grade} – Section ${sec}`;
 
@@ -1888,21 +2062,22 @@ function RosterPage({ label, initial, onSave, onBack, onDownload, onCodeList, fl
     const names = parseNames(text != null ? text : paste[g]).map(toMiddleInitial);
     if (!names.length) return flash("Nothing to paste. Copy the names from your class record first.");
     const arr = (g === "B" ? boys : girls).slice();
-    const extra = Math.max(0, startAt + names.length - ROSTER_ROWS);
-    names.slice(0, ROSTER_ROWS - startAt).forEach((nm, k) => { arr[startAt + k] = nm; });
+    const rows = freeRows(g).filter(i => i >= startAt);                                  // reserved (NLS) rows are skipped, never filled
+    const extra = Math.max(0, names.length - rows.length);
+    names.slice(0, rows.length).forEach((nm, k) => { arr[rows[k]] = nm; });
     set(g, arr); if (text == null) setPaste({ ...paste, [g]: "" });
-    flash(`${Math.min(names.length, ROSTER_ROWS - startAt)} ${g === "B" ? "boys" : "girls"} filled from ${g}-${startAt + 1}.` + (extra ? ` ${extra} name(s) did not fit (max ${ROSTER_ROWS}).` : ""));
+    flash(`${Math.min(names.length, rows.length)} ${g === "B" ? "boys" : "girls"} filled from ${g}-${startAt + 1}.` + (extra ? ` ${extra} name(s) did not fit (max ${ROSTER_ROWS}).` : ""));
   };
-  const sortAZ = g => { const arr = (g === "B" ? boys : girls).filter(Boolean).sort(compareNames); set(g, fit(arr)); flash(`${g === "B" ? "Boys" : "Girls"} sorted A–Z by last name. Codes renumbered.`); };
+  const sortAZ = g => { const sorted = (g === "B" ? boys : girls).filter(Boolean).sort(compareNames), arr = blank(); freeRows(g).forEach((i, k) => { if (k < sorted.length) arr[i] = sorted[k]; }); set(g, arr); flash(`${g === "B" ? "Boys" : "Girls"} sorted A–Z by last name. Codes renumbered.`); };
   const count = arr => arr.filter(Boolean).length;
 
   const trySave = () => {
     setChecking(true);
     setTimeout(async () => {
-      const b = orderProblems(boys), gl = orderProblems(girls);
+      const b = orderProblems(boys, resv("B")), gl = orderProblems(girls, resv("G"));
       setBad({ B: b, G: gl }); setChecking(false);
       if (b.size || gl.size) { flash("Some names are not in A–Z order by last name (shown in red). Fix them or tap Sort A–Z."); return; }
-      const ok = await onSave({ boys: boys.map(x => x.trim()), girls: girls.map(x => x.trim()) });
+      const ok = await onSave({ boys: boys.map(x => x.trim()), girls: girls.map(x => x.trim()), ...(Object.keys(nls).length ? { nls } : {}) });
       if (ok) { setDirty(false); setSaved(true); }
     }, 3000);
   };
@@ -1922,7 +2097,12 @@ function RosterPage({ label, initial, onSave, onBack, onDownload, onCodeList, fl
       </div>
       {bad[g].size > 0 && <p className="text-xs text-red-300 mb-2">Red rows are out of A–Z order by last name (or empty rows between names). Move them, or tap Sort A–Z.</p>}
       <div className="max-h-[60vh] overflow-y-auto pr-1 space-y-1">
-        {arr.map((v, i) => (
+        {arr.map((v, i) => nls[`${g}-${i + 1}`] ? (
+          <div key={i} className="flex items-center gap-2">
+            <span className="w-12 shrink-0 text-center font-mono text-xs font-bold text-slate-500 bg-slate-950/70 border border-white/10 rounded py-1 select-none">{g}-{i + 1}</span>
+            <span className="flex-1 text-[11px] text-slate-500 italic px-2 py-1 border border-dashed border-white/10 rounded">No longer in school · code kept, not reused</span>
+            <button onClick={() => { const a = arr.slice(); a[i] = nls[`${g}-${i + 1}`]; const x = { ...nls }; delete x[`${g}-${i + 1}`]; setNls(x); set(g, a); }} className="text-[11px] px-2 py-1 rounded bg-white/10" title="Put the learner back (then Save)">Undo</button>
+          </div>) : (
           <div key={i} className="flex items-center gap-2">
             <span className="w-12 shrink-0 text-center font-mono text-xs font-bold text-cyan-200 bg-slate-950/70 border border-white/10 rounded py-1 select-none">{g}-{i + 1}</span>
             <input value={v} onChange={e => { const a = arr.slice(); a[i] = up(e.target.value); set(g, a); }}
@@ -1947,7 +2127,7 @@ function RosterPage({ label, initial, onSave, onBack, onDownload, onCodeList, fl
           <li>Names must be in <b>alphabetical order by last name</b>, because the order gives each learner a permanent code: 1st boy = <b>B-1</b>, 2nd = <b>B-2</b>… The same goes for girls (<b>G-1</b>…).</li>
           <li>Paste the boys in <b>BOYS</b> (left) and the girls in <b>GIRLS</b> (right), press <b>Fill</b>, check the names, then press <b>{saveLabel}</b>.</li>
         </ol>
-        <p className="text-xs text-emerald-200 bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-2 mt-3">🔒 Privacy (DO 15, s. 2026): learner names are saved <b>only on this device</b>. They are never sent to Claude. Names are printed on the answer sheets for handing out, but the scanner covers the name before anything goes to Claude, so Claude only ever sees codes like B-7.</p>
+        <p className="text-xs text-emerald-200 bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-2 mt-3">🔒 Privacy (DO 15, s. 2026): learner names are saved <b>only on this device</b>. They are never sent to Claude. Only the last name is printed on each answer sheet (small, for handing out; learners write their full name), and the scanner covers the name area before anything goes to Claude, so Claude only ever sees codes like B-7.</p>
         <p className="text-[11px] text-slate-500 mt-2">Codes like B-1 are fixed and can't be edited. Numbers, codes, LRNs and extra Excel columns are removed when you paste. Pasting many names into one row fills downward from there.</p>
         <div className="flex flex-wrap items-center gap-3 mt-4">
           <button disabled={checking || total === 0} onClick={trySave} className="px-5 py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold disabled:opacity-40">
@@ -1956,7 +2136,7 @@ function RosterPage({ label, initial, onSave, onBack, onDownload, onCodeList, fl
         </div>
         {saved && !dirty && total > 0 && (
           <div className="mt-4 rounded-xl border border-amber-400/40 bg-amber-400/10 p-3">
-            <p className="text-sm text-amber-100 mb-2">📄 Download named answer sheets: <b>{count(boys)} boys + {count(girls)} girls + 1 ANSWER KEY = {total + 1} sheets</b> on {Math.ceil((total + 1) / 4)} A4 page(s). Each sheet is printed with the learner's <b>NAME and CODE</b>, grade & section, subject and exam, so you can hand them out right away. (Names stay on paper and on this device; the scanner only sends codes to Claude.)</p>
+            <p className="text-sm text-amber-100 mb-2">📄 Download named answer sheets: <b>{count(boys)} boys + {count(girls)} girls + 1 ANSWER KEY = {total + 1} sheets</b> on {Math.ceil((total + 1) / 4)} A4 page(s). Each sheet is printed with the learner's <b>CODE</b> and a small <b>last-name label</b> at the top (the learner writes the full name on the Name line), grade & section, subject and exam, so you can hand them out right away. (Names stay on paper and on this device; the scanner only sends codes to Claude.)</p>
             <div className="flex flex-wrap gap-2">
               <button onClick={() => onDownload({ boys, girls }, "pdf")} className="px-4 py-2 rounded-lg bg-amber-400 text-slate-950 font-bold">⬇ Answer Sheets for {sec} (PDF)</button>
               <button onClick={() => onDownload({ boys, girls }, "docx")} className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold">⬇ Word (.docx)</button>
@@ -1975,7 +2155,7 @@ function RosterPage({ label, initial, onSave, onBack, onDownload, onCodeList, fl
         const picked = extra.filter(Boolean).map(c => ({ code: c, name: c === "KEY" ? "" : (opts.find(o => o[0] === c) || [])[1] || "" }));
         return <Card className="border border-rose-400/40">
           <h3 className="font-black text-white mb-1">🖨️ Print Extra Sheets</h3>
-          <p className="text-xs text-slate-400 mb-3">A learner's sheet got wet or torn? Pick up to <b>4 learners</b> (4 sheets fit on one A4 page). Their new sheets get the same name and code, so the scanner still knows them.</p>
+          <p className="text-xs text-slate-400 mb-3">A learner's sheet got wet or torn? Pick up to <b>4 learners</b> (4 sheets fit on one A4 page). Their new sheets get the same label and code, so the scanner still knows them.</p>
           <div className="grid sm:grid-cols-2 gap-2">
             {extra.map((v, i) => <div key={i}><Label>Sheet {i + 1}</Label>
               <Select value={v} onChange={e => setExtra(x => x.map((y, j) => j === i ? e.target.value : y))}>
@@ -2596,7 +2776,7 @@ function App() {
   const downloadSheets = async (label, rs, kind = "pdf", extra = null) => {
     const o = { profile, gradeSection: label, subject: subj.label, exam: `${examLabel} · ${term}`, n };
     const base = `DepEd_Answer_Sheets_${String(label).replace(/[^\w]+/g, "_")}_${n}items${extra ? "_EXTRA_" + extra.map(x => x.code).join("_") : ""}`;
-    const list = extra || learnersOf(rs);
+    const labels = sheetLabels(rs), list = (extra || learnersOf(rs)).map(l => ({ ...l, label: l.code === "KEY" ? "" : labels[l.code] || "" }));   // name line stays blank: learners write it
     try {
       if (kind === "pdf") await saveFile(sheetsPdf(o, list), base + ".pdf", "application/pdf");
       else await saveFile(await sheetsDocx(o, list), base + ".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
@@ -2610,6 +2790,22 @@ function App() {
   // scanned sheets and absences are saved with this grade's record (see GRADE WORKSPACES), not in the old single keys
   const markAbsent = code => { setAbsent(a => (a.includes(code) ? a : [...a, code])); flash(code + " marked ABSENT for this exam."); };
   const unmarkAbsent = code => setAbsent(a => a.filter(x => x !== code));
+  // No longer in school: off the class list (so off every list, report and statistic); the code stays reserved. Undo puts it back.
+  const markNLS = code => {
+    const label = `${grade} – ${section}`, rs2 = rosterMarkNLS(rosters[label], code);
+    if (!rs2) return flash(`${code} is not in ${label}'s class list.`);
+    if (!nlsAllowed(code, scannedIds)) return flash(`${code} has a scanned sheet in this exam. Nothing was changed.`);   // never delete a real score
+    if (!localStore.set(rosterKey(label), rs2)) return flash("Saving failed. Try again.");
+    setRosters(x => ({ ...x, [label]: rs2 })); setAbsent(a => a.filter(x => x !== code));
+    imgStore.keys(label + "|").then(ks => Promise.all(imgKeysOf(ks, label, code).map(k => imgStore.del(k)))).catch(() => {});   // their sheet pictures + name strips
+    flash(`${code} marked No longer in school. The code stays reserved. Undo is in the Scanner.`);
+  };
+  const undoNLS = code => {
+    const label = `${grade} – ${section}`, rs2 = rosterUndoNLS(rosters[label], code);
+    if (!rs2) return flash("Couldn't undo. Check the class list in Class Setup.");
+    if (!localStore.set(rosterKey(label), rs2)) return flash("Saving failed. Try again.");
+    setRosters(x => ({ ...x, [label]: rs2 })); flash(`${code} is back in the class list.`);
+  };
   const loadJson = () => {
     try {
       const o = JSON.parse(rawText);
@@ -2719,7 +2915,7 @@ function App() {
       ["GRADESHEET"], ["Group", "Learner ID", "Initials", ...key.map((_, i) => `Q${i + 1}`), "Score", "Percent", "Status", "Proficiency Level"]];
     data.all.forEach(s => rows.push([gender(s.id) === "B" ? "Boys" : gender(s.id) === "G" ? "Girls" : "Unsorted", s.id, withInitials ? s.name : "", ...s.marks.map(m => m ? 1 : 0), s.score, fmt(s.pct), s.pass ? "Passed" : "Failed", proficiency(s.pct).label]));
     data.absentIds.forEach(id => rows.push([gender(id) === "B" ? "Boys" : "Girls", id, withInitials ? toInitials(rosterName(id)) : "", ...key.map(() => ""), "", "", "ABSENT", ""]));
-    rows.push([], ["SUMMARY"], ["Total Learners", data.total], ["Boys", data.bStats.count], ["Girls", data.gStats.count],
+    rows.push([], ["SUMMARY"], ...(roster ? [["Enrolled", data.enrolled.length]] : []), ["Total Learners", data.total], ["Boys", data.bStats.count], ["Girls", data.gStats.count],
       ["Passing Mark (%)", passMark], ["Passed", data.passed], ["Failed", data.total - data.passed], ["Absent", data.absentIds.length], ["Passing Rate (%)", fmt(data.passingRate)],
       ["Class Mean", fmt(data.mean)], ["Standard Deviation", fmt(data.sd)], ["Class MPS (%)", fmt(data.mps)], ["Proficiency Level", proficiency(data.mps).label],
       ["Boys Mean", fmt(data.bStats.mean)], ["Boys MPS (%)", fmt(data.bStats.mps)], ["Girls Mean", fmt(data.gStats.mean)], ["Girls MPS (%)", fmt(data.gStats.mps)],
@@ -2754,7 +2950,7 @@ Term: ${term}
 Exam: ${examLabel}
 Subject / Learning Area: ${subj.label}
 Number of Items: ${n}
-Learners Tested: ${data.total} (Boys ${data.bStats.count}, Girls ${data.gStats.count})${roster ? ` of ${data.enrolled.length} enrolled` : ""}
+Learners Tested: ${data.total} (Boys ${data.bStats.count}, Girls ${data.gStats.count})${roster ? ` of ${data.enrolled.length} enrolled · Absent: ${data.absentIds.length}` : ""}
 
 Passing Mark: ${passMark}%   Passed: ${data.passed}   Failed: ${data.total - data.passed}   Passing Rate: ${fmt(data.passingRate)}%
 
@@ -2801,7 +2997,8 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
     const st1 = pick("ST1"), st2 = pick("ST2"), te = pick("TE");
     const rs = rosters[cls];
     const enrolled = rs ? [...rs.boys.map((v, i) => v ? `B-${i + 1}` : null), ...rs.girls.map((v, i) => v ? `G-${i + 1}` : null)].filter(Boolean) : [];
-    const ids = [...new Set([...enrolled, ...[st1, st2, te].filter(Boolean).flatMap(x => Object.keys(x.scores))])]
+    const gone = new Set(nlsCodes(rs));                                                // No longer in school: left out of every report
+    const ids = [...new Set([...enrolled, ...[st1, st2, te].filter(Boolean).flatMap(x => Object.keys(x.scores))])].filter(id => !gone.has(id))
       .sort((a, b) => (gender(a) === gender(b) ? idNum(a) - idNum(b) : gender(a) === "B" ? -1 : 1));
     const nameOf = id => { if (!rs) return ""; const k = idNum(id) - 1; const list = gender(id) === "B" ? rs.boys : rs.girls; return list && list[k] ? toInitials(list[k]) : ""; };
     const rows = ids.map(id => {
@@ -2837,7 +3034,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
     const keys = ["profile", "config", "key", "keySaved", "classes", "history", "passMark", "passMarkV2", "sessionStudents", "sessionAbsent", "activeGrade", "activeSection", "wsIndex", ...GRADES.map(wsKey), ...classes.map(rosterKey)];
     let ok = true;
     for (const k of keys) { if (!(await store.set(k, null))) ok = false; }
-    await imgStore.wipe();
+    await imgStore.wipe(); ScanLog.clear();
     if (!store.db) { Vault.erase(); window.location.reload(); return; }   // website: this email's data is gone; sign in again = new history
     try { Object.keys(localStorage).filter(k => k.startsWith("jordynai_")).forEach(k => localStorage.removeItem(k)); } catch (e) {}
     setProfile(DEFAULT_PROFILE); setConfig(DEFAULT_CONFIG); setKey(Array(50).fill("A")); setKeySaved(false);
@@ -2853,6 +3050,25 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
     setModal(null); setTab("setup"); flash(`Cleared ${grade}. Set up its next exam.`);
   };
 
+  // "Send log to YAL": website only, signed in with Google as an admin email (compared as SHA-256 hashes)
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => { if (!loaded || store.db || Acct.via !== "google") return; let on = true; isAdminEmail(Acct.email).then(v => on && setIsAdmin(v)); return () => { on = false; }; }, [loaded]);
+  const [logCount, setLogCount] = useState(0);
+  useEffect(() => { if (isAdmin && tab === "scan") setLogCount(ScanLog.read().length); }, [isAdmin, tab, students.length, scanWaiting]);
+  const sendScanLog = () => {
+    const entries = ScanLog.read(); setLogCount(entries.length);
+    if (!entries.length) return flash("The scan log is empty. Scan some sheets first.");
+    const out = { app: "JordynAI Exam Analyzer", version: APP_VERSION, exported: new Date().toISOString(), device: navigator.userAgent, scans: entries.length,
+      note: "Numbers only: no learner names, no photos, no name strips.", entries };
+    saveFile(JSON.stringify(out, null, 1), `jordynai-scanlog-${new Date().toISOString().slice(0, 10)}.json`, "application/json");
+  };
+  const [scanPick, setScanPick] = useState(null);   // Scanner "Change class": { g, label }
+  const [askSection, setAskSection] = useState(null);   // { label, saved, waiting }: other section of the same grade
+  const scanClass = (label, force) => {
+    const chk = sectionSwitchCheck(grade, section, label, students.length, scanWaiting);
+    if (!force && (chk === "refuse" || chk === "confirm")) { setAskSection({ label, saved: students.length, waiting: scanWaiting, refuse: chk === "refuse" }); return; }
+    setAskSection(null); pickClass(label); setScanPick(null); goTab("scan");
+  };
   const goTab = t => {
     const ok = t === "setup" || (t === "scan" ? profile.configured : unlocked);   // the Scanner can SAVE the key (scan the KEY sheet), so it only needs the profile
     if (!ok) { setShake(t); setTimeout(() => setShake(""), 600); flash(!profile.configured ? "Finish your school profile first." : "Save the Answer Key first (encode it, or scan the KEY sheet in the Scanner) to unlock this tab."); return; }
@@ -3064,6 +3280,8 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
             {classes.length > 0 && <div className="flex flex-wrap gap-2 mt-2">
               {classes.filter(c => gradeOf(c) === grade).map(c => <button key={c} onClick={() => setRosterView(c)} className="text-[11px] px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/25">
                 👥 Add Students from {sectionOf(c)}{rosterCount(c) ? ` (${rosterCount(c)})` : ""}</button>)}
+              {classes.filter(c => gradeOf(c) === grade).map(c => <button key={"scan" + c} onClick={() => scanClass(c)} className="text-[11px] px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-400/40 text-cyan-200 hover:bg-cyan-500/25">
+                📷 Scan this class: {sectionOf(c)}</button>)}
             </div>}
             <p className="text-xs text-slate-400 mt-3">Checking now: <b className="text-white">{gradeSection}</b> · {examLabel} · {subj.label} · {n} items · {students.length} learner(s) loaded{roster ? ` · ${roster.boys.filter(Boolean).length + roster.girls.filter(Boolean).length} enrolled in the student list` : " · no student list yet"}</p>
             <details className="mt-3">
@@ -3078,9 +3296,26 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
         </>}
 
         {tab === "scan" && profile.configured && <>
-          <ScanPanel key={grade} grade={grade} getGrade={getGrade} onBusy={setScanBusy} onWaiting={setScanWaiting} onStudent={addScanned} onKey={onScannedKey} n={n} hasKey={keySaved} meta={imgMeta}
+          <Card className="!p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-slate-300">📷 Scanning class: <b className="text-white text-base">{gradeSection}</b>{roster ? ` · ${scanQueue.length} learners` : " · no class list yet"}</p>
+              <button disabled={gradeLocked} onClick={() => setScanPick(p => (p ? null : { g: grade, label: classes.includes(activeLabel) ? activeLabel : "" }))} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-40">{scanPick ? "Close" : "Change class"}</button>
+            </div>
+            {scanPick && (() => { const secs = classes.filter(c => gradeOf(c) === scanPick.g);
+              return <div className="grid sm:grid-cols-[1fr_1fr_auto] gap-2 items-end mt-2">
+                <label><Label>Grade</Label><Select value={scanPick.g} onChange={e => setScanPick({ g: e.target.value, label: "" })}>
+                  {GRADES.filter(g => g === grade || classes.some(c => gradeOf(c) === g)).map(g => <option key={g} value={g}>{g}</option>)}</Select></label>
+                <label><Label>Section</Label><Select value={scanPick.label} onChange={e => setScanPick({ ...scanPick, label: e.target.value })}>
+                  <option value="">{secs.length ? "Pick a section…" : "No saved class in this grade"}</option>{secs.map(c => <option key={c} value={c}>{sectionOf(c)}</option>)}</Select></label>
+                <button disabled={!scanPick.label || gradeLocked} onClick={() => scanClass(scanPick.label)} className="px-4 py-2 rounded-lg bg-cyan-500 text-slate-950 font-bold disabled:opacity-40">Scan this class</button>
+              </div>; })()}
+          </Card>
+          <ScanPanel key={grade + "|" + section} grade={grade} getGrade={getGrade} onBusy={setScanBusy} onWaiting={setScanWaiting} onStudent={addScanned} onKey={onScannedKey} n={n} hasKey={keySaved} meta={imgMeta}
             queue={scanQueue} scannedIds={scannedIds} absent={absent} onAbsent={markAbsent} onUnabsent={unmarkAbsent}
-            gradeSection={gradeSection} onReport={makeReport} />
+            gradeSection={gradeSection} onReport={makeReport} section={section} nls={nlsCodes(roster)} onNLS={markNLS} onUndoNLS={undoNLS} />
+          {isAdmin && !store.db && <Card className="!p-3"><div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs text-slate-400">🛠️ Admin: scan log ({logCount} scans, numbers only, no names or photos)</span>
+            <button onClick={sendScanLog} className="px-3 py-1.5 text-xs rounded-lg bg-violet-500 text-white font-bold">📤 Send log to YAL</button></div></Card>}
           <Card><p className="text-sm text-slate-300">{students.length} learner(s) in <b>{gradeSection}</b>. {students.length > 0 && <button onClick={() => setTab("grades")} className="text-cyan-300 underline">See Gradesheet →</button>}</p></Card>
         </>}
 
@@ -3214,6 +3449,22 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
             <button onClick={() => doSwitch(switchFail.g, switchFail.sec)} className="flex-1 py-2.5 rounded-xl bg-cyan-500 text-slate-950 font-bold">↻ Try again</button></div>
           <button onClick={() => { if (!armSwitchEmpty) { setArmSwitchEmpty(true); return; } doSwitch(switchFail.g, switchFail.sec, true); }} className={`w-full mt-3 py-3 rounded-xl text-sm font-bold ${armSwitchEmpty ? "bg-red-600 text-white" : "bg-white/10 text-slate-300"}`}>{armSwitchEmpty ? `Tap again: start ${switchFail.g} EMPTY (its saved key and scans will not be used)` : `Start ${switchFail.g} empty`}</button>
           <p className="text-[11px] text-slate-500 mt-2">Only if Try again keeps failing AND you are sure {switchFail.g} has no saved key or scans (for example after Reset All).</p></div>
+      </Modal>}
+      {askSection && <Modal onClose={() => setAskSection(null)}>
+        <div className="text-center"><div className="text-4xl mb-2">⚠️</div>
+          <h3 className="text-lg font-black text-white mb-2">{gradeSection} still has scans</h3>
+          <p className="text-sm text-slate-400 mb-4">{askSection.saved} saved scan(s){askSection.waiting ? ` and ${askSection.waiting} waiting for your check` : ""}. {askSection.refuse
+            ? <>Finish this section first (Gradesheet, then ✅ Finalize Session in Summary & CSV) or clear it, then switch to {sectionOf(askSection.label)}. Otherwise its scans would show under the wrong section.</>
+            : <>If you switch to {sectionOf(askSection.label)} now, the waiting sheets are cleared and must be rescanned.</>}</p>
+          <div className="flex gap-2"><button onClick={() => setAskSection(null)} className="flex-1 py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold">Stay on {section || "this class"}</button>
+            {!askSection.refuse && <button onClick={() => scanClass(askSection.label, true)} className="flex-1 py-2.5 rounded-xl bg-white/10">Switch anyway</button>}</div>
+          {askSection.refuse && (isFinalized(history, { gradeSection, term, slot, subject: subj.label })
+            ? <button onClick={() => { if (!askSection.armed) { setAskSection({ ...askSection, armed: true }); return; }
+                setStudents([]); setAbsent([]); scanClass(askSection.label, true); flash(`Scans of ${gradeSection} cleared (answer key kept). Now scanning ${askSection.label}.`); }}
+                className="w-full mt-2 py-2 rounded-xl bg-red-600/80 text-white text-sm font-bold">
+                {askSection.armed ? `Tap again: delete ${askSection.saved} scan(s) of ${section}` : `Finalized ✔ Clear these ${askSection.saved} scan(s), keep the answer key, and switch`}</button>
+            : <><p className="text-sm font-bold text-red-300 mt-3">NOT finalized yet: these {askSection.saved} score(s) will be lost. Finalize first.</p>
+                <button disabled className="w-full mt-2 py-2 rounded-xl bg-red-600/40 text-white/60 text-sm font-bold">Clear these scans and switch (finalize first)</button></>)}</div>
       </Modal>}
       {askSwitch && <Modal onClose={() => setAskSwitch(null)}>
         <div className="text-center"><div className="text-4xl mb-2">⚠️</div>
