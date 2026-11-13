@@ -161,6 +161,8 @@ const GEO = {
   itemsTop: 46.2, itemsLeft: 6, colGap: 1.6,
   codeBox: { x: 79, y: 19.5, w: 20, h: 18.5 },
   dots: { x0: 80.2, y: 33.4, size: 1.6, step: 2.0, count: 9 },                 // CODE dot strip inside the box
+  gradeDots: { x0: 67, y: 15.6, size: 1.6, step: 2.0, count: 6 },               // GRADE dot strip, right of "ANSWER SHEET" (free paper; older sheets are blank here)
+  gradeBadge: { x: 6, y: 14.4, w: 24, h: 4.0 },                                  // big black "GRADE 8" label, left of "ANSWER SHEET": sort the paper by eye
   paperProbe: [[20, 138.6], [35, 138.6], [50, 138.6], [65, 138.6], [80, 138.6], [3, 60], [3, 100], [101.5, 60], [101.5, 100]],   // margins only: never under handwriting
 };
 /* Dot code, 9 cells: [start=1, isGirl, isKey, n5 n4 n3 n2 n1 n0] -> B-1..B-63, G-1..G-63, KEY */
@@ -176,6 +178,19 @@ function bitsToCode(bits) {
   if (bits[2]) return bits[1] || bits.slice(3).some(Boolean) ? null : "KEY";
   const n = bits.slice(3).reduce((t, b) => t * 2 + b, 0);
   return n >= 1 ? `${bits[1] ? "G" : "B"}-${n}` : null;
+}
+/* Grade dot code, 6 cells: [start=1, v3 v2 v1 v0, odd parity of v] -> GRADES[v] (Kinder..Grade 12).
+   No start dot = an older sheet printed before grade marks: grade unknown. */
+function gradeToBits(grade) {
+  const v = GRADES.findIndex(g => up(g) === up(grade)); if (v < 0) return null;
+  const b = [3, 2, 1, 0].map(i => (v >> i) & 1);
+  return [1, ...b, b.reduce((t, x) => t + x, 0) % 2 ? 0 : 1];
+}
+function bitsToGrade(bits) {
+  if (!bits || bits.length !== 6 || bits[0] !== 1) return null;
+  const b = bits.slice(1, 5), v = b.reduce((t, x) => t * 2 + x, 0);
+  if ((b.reduce((t, x) => t + x, 0) + bits[5]) % 2 !== 1) return null;   // parity broken: misread
+  return v < GRADES.length ? GRADES[v] : null;
 }
 /* Where each bubble's center is (mm, sheet-local). */
 function bubbleCenters(n) {
@@ -201,6 +216,16 @@ function drawSheetCell(pen, o, learner, ox, oy) {
   pen.text(`${reg} · ${div}`, X(52.5), Y(10.4), 5, { align: "center" });
   pen.text(school, X(52.5), Y(13.6), school.length > 44 ? 5.8 : 7, { align: "center", bold: true });
   pen.text("ANSWER SHEET", X(52.5), Y(17.4), 8.5, { align: "center", bold: true });
+  // GRADE LEVEL: big label for sorting by eye + dot strip the scanner reads (a Grade 7 sheet is refused while checking Grade 8)
+  const gLabel = GRADES.find(g => up(g) === up(o.grade || String(o.gradeSection || "").split(" – ")[0]));
+  if (gLabel) {
+    const GB = GEO.gradeBadge, gt = up(gLabel); let gpt = 10;
+    while (gpt > 6 && pen.width(gt, gpt) * 1.12 > GB.w - 2) gpt -= 0.5;
+    pen.rect(X(GB.x), Y(GB.y), GB.w, GB.h, { fill: "#000", r: 0.8 });
+    pen.text(gt, X(GB.x + GB.w / 2), Y(GB.y + GB.h / 2 + gpt * PT * 0.36), gpt, { align: "center", bold: true, color: "#ffffff" });
+    const GD = GEO.gradeDots;
+    gradeToBits(gLabel).forEach((bit, i) => pen.rect(X(GD.x0 + i * GD.step), Y(GD.y), GD.size, GD.size, bit ? { fill: "#000" } : { stroke: "#000", lw: 0.15 }));
+  }
   const field = (label, x, y, x2, printed) => {
     pen.text(label, X(x), Y(y), 6.2);
     const lx = X(x) + pen.width(label, 6.2) + 1;
@@ -560,6 +585,24 @@ function inkLevel(G, map, x0, x1, cy, h) {
   for (let i = 0; i <= 16; i++) for (let j = -4; j <= 4; j++) { const [x, y] = map(x0 + (x1 - x0) * i / 16, cy + j / 4 * h); v.push(lum(G, x, y)); }
   v.sort((a, b) => a - b); return (v[1] + v[2] + v[3]) / 3;                 // thin digit strokes: a few darkest samples
 }
+/* Grade dots -> { sheetGrade: "Grade 8" | null, gradeMark: "ok" | "unclear" | "none" (older sheet) }. */
+function readGradeMark(G, map, paper) {
+  const GD = GEO.gradeDots, at = i => [GD.x0 + i * GD.step + GD.size / 2, GD.y + GD.size / 2];
+  const gPaper = Math.max(patchMedian(G, map, GD.x0 + GD.count * GD.step / 2, GD.y + GD.size + 1.2, 0.4), paper * 0.8);
+  // "none" (older sheet) ONLY if all 6 cells are plain paper: no dot and no printed outline anywhere (edges included).
+  // New sheets always have at least 2 solid black cells, so glare on one dot can never make a new sheet look "old".
+  const inkIn = i => { const v = [], x0 = GD.x0 + i * GD.step - 0.1, y0 = GD.y - 0.1, w = GD.size + 0.2;
+    for (let a = 0; a <= 8; a++) for (let b = 0; b <= 8; b++) { const [x, y] = map(x0 + w * a / 8, y0 + w * b / 8); v.push(lum(G, x, y)); }
+    v.sort((p, q) => p - q); return v[2]; };                                     // 3rd darkest: one noisy pixel is not ink
+  if (Array.from({ length: GD.count }, (_, i) => inkIn(i)).every(v => v > gPaper * 0.75)) return { sheetGrade: null, gradeMark: "none" };
+  const gInk = patchMedian(G, map, ...at(0), GD.size * 0.2);                  // the first dot is ALWAYS black on new sheets
+  if (gInk > gPaper * 0.6) return { sheetGrade: null, gradeMark: "unclear" };  // something is printed here, but the start dot is not clear
+  const thr = Math.max(gPaper * 0.55, gInk + (gPaper - gInk) * 0.5);
+  const f = Array.from({ length: GD.count }, (_, i) => fillOf(G, map, ...at(i), GD.size * 0.3, thr));
+  const sure = f.every(v => v < 0.3 || v > 0.7);                                // half-dark = unsure: never guess a grade
+  const g = sure ? bitsToGrade(f.map(v => (v > 0.5 ? 1 : 0))) : null;
+  return { sheetGrade: g, gradeMark: g ? "ok" : "unclear" };
+}
 /* Read a whole sheet. n = items on the sheet. */
 function readSheet(src, n) {
   const loc = locateSheet(src, n);
@@ -610,7 +653,8 @@ function readSheet(src, n) {
   const bits = dotFill.map(f => (f > 0.5 ? 1 : 0));
   const codeSure = dotFill.every(f => f < 0.3 || f > 0.7);                   // half-dark dots = unsure: never guess a code
   const code = codeSure ? bitsToCode(bits) : null;
-  return { ok: true, answers, flagged, fills, code, codeSure, bits, ringScore, gapScore, layoutOk: ringScore > 0.3 && gapScore > 0.5 && !(altRing > ringScore * 1.25 && altRing > 0.45), paper, map, G, pts: loc.pts };
+  const { sheetGrade, gradeMark } = readGradeMark(G, map, paper);
+  return { ok: true, answers, flagged, fills, code, codeSure, bits, sheetGrade, gradeMark, ringScore, gapScore, layoutOk: ringScore > 0.3 && gapScore > 0.5 && !(altRing > ringScore * 1.25 && altRing > 0.45), paper, map, G, pts: loc.pts };
 }
 /* Straightened 1050 x 1485 crop (for thumbnails and the Claude backup). */
 function warpCrop(res, ppm = 5, x0 = 0, y0 = 0, x1 = GEO.W, y1 = GEO.H) {
@@ -1052,6 +1096,20 @@ const store = {
       const v = raw ? JSON.parse(raw) : null; return v == null ? fallback : v;
     } catch (e) { return fallback; }
   },
+  /* Like get, but a FAILED read is never mistaken for "nothing saved": { ok: true, value } (value null = really nothing saved)
+     or { ok: false } (no internet, storage error). Grade records are only ever created after an ok read that found nothing. */
+  async read(k) {
+    try {
+      if (this.db) {
+        const snap = await this.ref(k).get();
+        const d = snap && (typeof snap.data === "function" ? snap.data() : snap.data !== undefined ? snap.data : snap);
+        return { ok: true, value: d && typeof d.v === "string" ? JSON.parse(d.v) : null };
+      }
+      if (Vault.isOpen()) return { ok: true, value: Vault.get("jordynai_" + k, null) };
+      const raw = localStorage.getItem("jordynai_" + k);
+      return { ok: true, value: raw ? JSON.parse(raw) : null };
+    } catch (e) { return { ok: false }; }
+  },
   async set(k, value) {
     try {
       if (this.db) { await this.ref(k).set({ v: JSON.stringify(value), at: Date.now() }); return true; }
@@ -1404,7 +1462,7 @@ function LiveScanner({ n, onResult, onClose }) {
 }
 
 /* ===================== SCANNER PANEL ===================== */
-function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absent, onAbsent, onUnabsent, gradeSection, onReport }) {
+function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absent, onAbsent, onUnabsent, gradeSection, onReport, grade, getGrade, onBusy, onWaiting }) {
   const [paused, setPaused] = useState(false);
   const [fx, setFx] = useState(null); const fxT = useRef(null);
   const fire = (ok, text, sub, sound = true, img = "") => {
@@ -1415,6 +1473,10 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absen
   const [sample, setSample] = useState(undefined);
   const [imgOK, setImgOK] = useState(false);
   const [items, setItems] = useState([]);   // {id, thumb, status: done|review|align|error, code, answers, flagged, msg, cropBlob, blob}
+  const [busyN, setBusyN] = useState(0);     // sheets still being read: the Grade buttons wait for them
+  useEffect(() => { onBusy && onBusy(busyN > 0); }, [busyN]);
+  useEffect(() => { onWaiting && onWaiting(items.filter(i => i.status !== "done").length); }, [items]);
+  useEffect(() => () => { onBusy && onBusy(false); onWaiting && onWaiting(0); }, []);
   const [aligning, setAligning] = useState(null);
   const [live, setLive] = useState(false);
   const [busyId, setBusyId] = useState("");
@@ -1432,7 +1494,10 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absen
   const patch = (id, p) => setItems(list => list.map(it => (it.id === id ? { ...it, ...p } : it)));
 
   const saveImages = (code, it) => { if (it.sheetBlob) imgStore.put(meta, code, it.sheetBlob, it.nameBlob); };
+  const wrongGrade = it => it.sheetGrade && grade && it.sheetGrade !== grade && !it.gradeOk;
   const commit = (it, code, answers) => {
+    if (getGrade && getGrade() !== grade) return `The grade was switched. Not saved. Rescan this sheet in the right grade.`;   // never save into another grade
+    if (wrongGrade(it)) return `This is a ${it.sheetGrade} sheet. You are checking ${grade}. Not saved.`;
     const c = up(code).replace(/\s/g, "");
     if (c === "KEY") {
       if (answers.some(a => !a)) return "The answer key has blank items. Fill every item first.";
@@ -1459,28 +1524,37 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absen
     cx.fillRect(NAME_STRIP[0] * 8, NAME_STRIP[1] * 8, (NAME_STRIP[2] - NAME_STRIP[0]) * 8, 6 * 8);
     const cropBlob = await canvasBlob(cc);
     if (!res.layoutOk) { fire(false, "SCAN UNSUCCESSFUL", `This sheet doesn't match ${n} items. Rescan, or check the Items setting.`); setItems(l => [{ id, status: "error", thumb, cropBlob, sheetBlob, nameBlob, nameThumb, blob, name, code: res.code || "", answers: Array(n).fill(null), flagged: [], msg: `This sheet doesn't match ${n} items. Was it printed for a different number of items? Reprint, or use Ask Claude.` }, ...l]); return; }
-    const item = { id, thumb, cropBlob, sheetBlob, nameBlob, nameThumb, blob, name, code: res.code || "", answers: res.answers.slice(), flagged: res.flagged.slice() };
+    const gc = gradeCheck(res.sheetGrade, res.gradeMark, grade);
+    const gradeNote = gc === "old" ? `Older sheet with no grade mark: make sure it is a ${grade} sheet.` : gc === "unclear" ? `Grade mark unclear: look at the paper. Is it a ${grade} sheet?` : "";
+    const item = { id, thumb, cropBlob, sheetBlob, nameBlob, nameThumb, blob, name, code: res.code || "", answers: res.answers.slice(), flagged: res.flagged.slice(), sheetGrade: res.sheetGrade || "", gradeNote };
+    if (wrongGrade(item)) {                                                        // a Grade 7 sheet while checking Grade 8 (or the reverse): never recorded
+      fire(false, "WRONG GRADE LEVEL", `This is a ${item.sheetGrade} sheet. You are checking ${grade}. It was NOT saved. Put it with the ${item.sheetGrade} papers.`, true, nameThumb);
+      setItems(l => [{ ...item, status: "review", msg: `This is a ${item.sheetGrade} sheet. You are checking ${grade}. Not saved. Rescan it after switching to ${item.sheetGrade} at the top.` }, ...l]);
+      return;
+    }
     const keyBlanks = res.code === "KEY" && res.answers.some(a => !a);
     const wasDup = res.code && res.code !== "KEY" && scannedIds && scannedIds.has(res.code);
     if (wasDup) {                                                                  // never overwrite silently
       fire(false, `${res.code} WAS ALREADY SCANNED`, "Not saved. If this is a fresh rescan of the same learner, tap Save in the list to replace the earlier one.", true, nameThumb);
       setItems(l => [{ ...item, status: "review", msg: `${res.code} was already scanned. Tap Save only to REPLACE the earlier scan.` }, ...l]);
-    } else if (res.code && !res.flagged.length && !keyBlanks) {
+    } else if (res.code && !res.flagged.length && !keyBlanks && gc !== "unclear") {
       const e = commit(item, res.code, res.answers);
       if (!e) { const who = res.code === "KEY" ? "" : ((queue || []).find(q => q.code === res.code) || {}).name || "";
-        fire(true, `${res.code === "KEY" ? "ANSWER KEY" : res.code} SAVED`, who ? `On your list: ${who} — check it matches the name on the sheet.` : "", true, res.code === "KEY" ? "" : nameThumb); }
+        fire(true, `${res.code === "KEY" ? "ANSWER KEY" : res.code} SAVED`, [who ? `On your list: ${who} — check it matches the name on the sheet.` : "", gradeNote].filter(Boolean).join(" "), true, res.code === "KEY" ? "" : nameThumb); }
       else fire(false, "NOT SAVED", e, true, nameThumb);
       setItems(l => [{ ...item, status: e ? "review" : "done", msg: e }, ...l]);
     } else {
-      const why = [!res.code && "no code found: type it", res.flagged.length && `${res.flagged.length} item(s) to check`, keyBlanks && "key has blanks"].filter(Boolean).join(" · ");
+      const why = [!res.code && "no code found: type it", res.flagged.length && `${res.flagged.length} item(s) to check`, keyBlanks && "key has blanks", gc === "unclear" && `grade mark unclear: check it is a ${grade} sheet`].filter(Boolean).join(" · ");
       fire(false, `${res.code || "THIS SHEET"} NEEDS YOUR CHECK`, why + ". It is NOT saved yet — fix it in the list, then tap Save.", true, nameThumb);
       setItems(l => [{ ...item, status: "review", msg: why }, ...l]);
     }
   };
 
   const fromFile = async (file, alignedBlob) => {
-    try { const img = await loadImage(alignedBlob || file); handleResult(readSheet(img, n), file.name || "photo", file); }
+    setBusyN(x => x + 1);
+    try { const img = await loadImage(alignedBlob || file); await handleResult(readSheet(img, n), file.name || "photo", file); }
     catch (e) { setItems(l => [{ id: Math.random().toString(36).slice(2), status: "error", msg: "This file isn't a readable photo." }, ...l]); }
+    finally { setBusyN(x => x - 1); }
   };
 
   const askClaude = async it => {
@@ -1557,11 +1631,13 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absen
             {it.thumb ? <img src={it.thumb} alt="" className="w-14 rounded bg-white shrink-0 self-start" style={{ aspectRatio: "1/1.414" }} /> : <div className="w-14 shrink-0 rounded bg-slate-800 text-[10px] text-slate-500 flex items-center justify-center" style={{ aspectRatio: "1/1.414" }}>no sheet</div>}
             <div className="flex-1 min-w-0 text-sm">
               {it.status === "done" && <><p className="text-emerald-300 font-bold">✔ {it.code === "KEY" ? "ANSWER KEY saved" : `${it.code} saved`} · {it.answers.filter(Boolean).length}/{n} answered</p>
+                {it.gradeNote && <p className="text-[11px] text-amber-300">⚠ {it.gradeNote}</p>}
                 {it.nameThumb && it.code !== "KEY" && <img src={it.nameThumb} alt="written name" title="The name written on this sheet" className="mt-1 h-7 max-w-full object-contain rounded bg-white" />}</>}
               {it.status !== "done" && <>
                 <p className={`${it.status === "review" ? "text-amber-200" : "text-red-300"} text-xs mb-1`}>{it.msg}</p>
                 {it.status === "align" && <button onClick={() => setAligning(it)} className="px-3 py-1.5 text-xs rounded-lg bg-cyan-500 text-slate-950 font-bold">Align by hand</button>}
                 {(it.status === "review" || it.status === "error") && <>
+                  {it.gradeNote && <p className="text-[11px] text-amber-300 mb-1">⚠ {it.gradeNote}</p>}
                   {it.nameThumb && <img src={it.nameThumb} alt="written name" title="The name written on this sheet" className="h-7 max-w-full object-contain rounded bg-white mb-1" />}
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-xs text-slate-400">Code</span>
@@ -1573,7 +1649,8 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absen
                         className={`w-5 h-5 rounded-full text-[9px] font-bold border ${(it.answers[q - 1] || "") === l ? "bg-cyan-400 text-slate-950 border-cyan-300" : "border-white/25 text-slate-300"}`}>{l || "–"}</button>)}</span>)}
                   </div>}
                   <div className="flex flex-wrap gap-2 mt-1">
-                    {it.status === "review" && <button onClick={() => { const e = commit(it, it.code, it.answers); if (e) patch(it.id, { msg: e }); else patch(it.id, { status: "done", code: up(it.code), msg: "" }); }} className="px-3 py-1.5 text-xs rounded-lg bg-emerald-500 text-slate-950 font-bold">Save</button>}
+                    {it.status === "review" && !wrongGrade(it) && <button onClick={() => { const e = commit(it, it.code, it.answers); if (e) patch(it.id, { msg: e }); else patch(it.id, { status: "done", code: up(it.code), msg: "" }); }} className="px-3 py-1.5 text-xs rounded-lg bg-emerald-500 text-slate-950 font-bold">Save</button>}
+                    {it.status === "review" && wrongGrade(it) && <button onClick={() => { const ok = { ...it, gradeOk: true }, e = commit(ok, it.code, it.answers); if (e) patch(it.id, { gradeOk: true, msg: e }); else patch(it.id, { gradeOk: true, status: "done", code: up(it.code), msg: "" }); }} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 text-amber-200">{up(it.code) === "KEY" ? `This answer key really is for ${grade}: save anyway` : `It really is a ${grade} learner: save anyway`}</button>}
                     {claudeOK && <button disabled={busyId === it.id} onClick={() => askClaude(it)} className="px-3 py-1.5 text-xs rounded-lg bg-white/10 disabled:opacity-40">{busyId === it.id ? "Asking Claude…" : "Ask Claude"}</button>}
                     <button onClick={() => setItems(l => l.filter(x => x.id !== it.id))} className="px-3 py-1.5 text-xs rounded-lg bg-white/5 text-slate-400">Remove</button>
                   </div>
@@ -1584,7 +1661,7 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absen
           </div>))}
       </div>
       </>}
-      {live && !paused && <LiveScanner n={n} onClose={() => setLive(false)} onResult={res => handleResult(res, "live camera", null)} />}
+      {live && !paused && <LiveScanner n={n} onClose={() => setLive(false)} onResult={res => { setBusyN(x => x + 1); handleResult(res, "live camera", null).finally(() => setBusyN(x => x - 1)); }} />}
       <ScanFlash fx={fx} />
       {aligning && <SheetAligner file={aligning.blob} index={0} total={1}
         onDone={async b => { const it = aligning; setAligning(null); setItems(l => l.filter(x => x.id !== it.id)); fromFile(it.blob, b); }}
@@ -1597,6 +1674,165 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absen
 const ROSTER_ROWS = 50;
 const rosterKey = label => "roster_" + String(label).replace(/[^\w]+/g, "_");
 const sectionOf = label => String(label).split(" – ").slice(1).join(" – ") || label;
+/* GRADE WORKSPACES: each grade keeps its own exam settings, answer key and scanned sheets (codes + answers only, never names).
+   One grade = ONE saved record "ws_<grade>", written in a single save, so it can never be half Grade 7 and half Grade 8.
+   "activeGrade" only points at the grade being worked on, and is written LAST when switching.
+   The old single keys (config, key, keySaved, sessionStudents, sessionAbsent) are read only once, to move old data in. */
+const gradeOf = label => String(label || "").split(" – ")[0];
+const wsKey = g => "ws_" + String(g).replace(/[^\w]+/g, "_");
+const wsRecord = s => ({ v: 1, grade: s.grade, section: s.section || "", config: s.config,
+  key: Array.isArray(s.key) ? s.key : Array((s.config && s.config.itemCount) || 50).fill("A"), keySaved: !!s.keySaved,
+  students: Array.isArray(s.students) ? s.students : [], absent: Array.isArray(s.absent) ? s.absent : [], at: Date.now() });
+const firstSectionOf = (classes, g) => { const c = (classes || []).find(x => gradeOf(x) === g); return c ? sectionOf(c) : ""; };
+const freshWs = (g, section, config) => wsRecord({ grade: g, section, config: { ...config }, key: Array(config.itemCount).fill("A"), keySaved: false, students: [], absent: [] });
+/* Saves each grade's latest record, one at a time, in order; only the newest waiting record per grade is written. */
+function makeWsWriter(st, onFail) {
+  const pending = {}, result = {}, latest = {}, timers = {}; let running = null;
+  const run = async () => { while (Object.keys(pending).length) { const g = Object.keys(pending)[0], r = pending[g]; delete pending[g];
+    result[g] = await st.set(wsKey(g), r);
+    if (!result[g] && !timers[g]) {                                // not saved (no internet): tell the teacher, try the NEWEST record again soon
+      if (onFail) onFail(g);
+      timers[g] = setTimeout(() => { delete timers[g]; if (latest[g] && !result[g] && !pending[g]) w.put(latest[g]); }, 8000);
+    } } };
+  const w = {
+    put(rec) { latest[rec.grade] = rec; pending[rec.grade] = rec; if (!running) running = run().finally(() => { running = null; }); return running; },
+    async idle() { while (running) await running; },
+    cancel() { Object.keys(timers).forEach(g => { clearTimeout(timers[g]); delete timers[g]; }); Object.keys(latest).forEach(g => delete latest[g]); Object.keys(pending).forEach(g => delete pending[g]); },
+    async flush(rec) { w.put(rec); await w.idle(); return result[rec.grade] === true; },   // true = this grade's newest record is saved
+  };
+  return w;
+}
+const LEGACY_KEYS = ["config", "key", "keySaved", "sessionStudents", "sessionAbsent"];   // the old single keys: read once to move old data, then emptied
+/* "wsMade": the grades that already have a saved record, remembered on THIS device. If one of them ever reads back
+   empty, that is a bad answer from storage (not "no data"), so nothing is created over it. ls = { get, set } device storage.
+   Returns { has, add, clear, store }: store = st, but every successful save of a grade record is noted automatically. */
+function wsMadeTracker(st, ls) {
+  const list = () => { const v = ls.get("wsMade", []); return Array.isArray(v) ? v : []; };
+  const t = {
+    all: () => list(),
+    has: g => list().includes(g),
+    add: g => { if (!t.has(g)) ls.set("wsMade", [...list(), g]); },
+    clear: () => ls.set("wsMade", []),
+    store: { read: k => st.read(k), get: (k, fb) => st.get(k, fb),
+      set: async (k, v) => { const ok = await st.set(k, v); if (ok && v && v.grade && k === wsKey(v.grade)) t.add(v.grade); return ok; } },
+  };
+  return t;
+}
+/* "wsIndex": the SHARED list (saved online with the records) of grades that have a saved space. A grade is added BEFORE its
+   record is first created, so the list is never missing a grade that has a record. Every device sees it, so a new device
+   (or one that missed a Reset All) knows which "empty" answers are real. */
+async function indexAdd(st, g, made) {
+  const r = await st.read("wsIndex"); if (!r.ok) return false;
+  const listed = Array.isArray(r.value), base = listed ? r.value : (made ? made.all() : []);   // no shared list yet: start it from this device's list
+  return listed && base.includes(g) ? true : st.set("wsIndex", [...new Set([...base, g])]);
+}
+/* The next grade read back EMPTY. Is that believable? "" = yes (a truly new grade), otherwise the reason it is not. */
+async function emptyLooksWrong(st, g, made, history, classes) {
+  const r = await st.read("wsIndex"); if (!r.ok) return "read";
+  if (Array.isArray(r.value)) return r.value.includes(g) ? "index" : "";        // the shared list decides (it follows Reset All too)
+  if (made && made.has(g)) return "device";                                        // no shared list yet: be careful
+  if ((history || []).some(h => h && gradeOf(h.gradeSection) === g)) return "history";
+  if ((classes || []).some(c => gradeOf(c) === g)) return "classes";
+  return "";
+}
+/* What to open on launch, from data that was read SUCCESSFULLY (launchStore never calls this after a failed read).
+   ag = saved activeGrade, ws = its record, legacy = the old single keys, existing = { grade: record } found when ag is missing.
+   Flags say what to save: writeRec (the record), writePointer (activeGrade), clearLegacy (empty the old keys). */
+function planLoad({ ag, ws, legacy, classes, history, existing }) {
+  const cl = classes || [], lg = legacy || {}, ex = existing || {};
+  const lcfg = lg.config, fromLegacy = g => wsRecord({ grade: g, section: firstSectionOf(cl, g), config: lcfg,
+    key: Array.isArray(lg.key) && lg.key.length ? lg.key : Array(lcfg.itemCount).fill("A"), keySaved: !!lg.keySaved, students: lg.students, absent: lg.absent });
+  const open = (r, g) => ({ ...wsRecord({ ...r, grade: g }), at: r.at, section: r.section || firstSectionOf(cl, g) });
+  if (GRADES.includes(ag)) {                                    // already moved over: the grade's own record, never the old keys
+    if (ws && ws.config && (!ws.grade || ws.grade === ag)) return { ask: null, set: open(ws, ag), writeRec: false };
+    // activeGrade is only ever saved AFTER its record, so "pointer but no record" means storage answered wrongly: Retry,
+    // never create an empty record over real work. ("Start <grade> empty" on the Retry screen is the only way.)
+    return { err: true, missing: ag };
+  }
+  // no pointer but grade records exist (the pointer save failed last time): open the newest record, never the old keys
+  const saved = Object.entries(ex).filter(([g, r]) => GRADES.includes(g) && r && r.config && (!r.grade || r.grade === g)).sort((a, b) => (b[1].at || 0) - (a[1].at || 0));
+  if (saved.length) return { ask: null, set: open(saved[0][1], saved[0][0]), writeRec: false, writePointer: true, clearLegacy: true, indexList: saved.map(x => x[0]) };
+  // first launch after this update: the old unfinished exam must go to the RIGHT grade
+  const grades = GRADES.filter(g => cl.some(c => gradeOf(c) === g));
+  const newest = (history || []).find(h => h && h.gradeSection), hg = newest ? gradeOf(newest.gradeSection) : "";
+  const students = Array.isArray(lg.students) ? lg.students : [];
+  const hasWork = !!lg.keySaved || students.length > 0;
+  if (hasWork && grades.length > 1)
+    return { ask: { choices: grades, suggest: grades.includes(hg) ? hg : grades[0], items: lcfg.itemCount, scanned: students.length, keySaved: !!lg.keySaved }, set: null, fromLegacy };
+  const g = grades.length === 1 ? grades[0] : grades.includes(hg) ? hg : grades[0] || (GRADES.includes(hg) ? hg : "Grade 7");
+  return { ask: null, set: fromLegacy(g), writeRec: true, writePointer: true, clearLegacy: true, indexList: [] };
+}
+/* Save in a safe order: the record first, then the pointer, then empty the old keys. Returns false if a needed save failed. */
+async function commitPlan(st, rec, f) {
+  // all grade records were read just now, so indexList is the complete truth: save the shared list first
+  if (f.indexList && !(await st.set("wsIndex", [...new Set([...f.indexList, rec.grade])]))) return false;
+  if (f.writeRec && !(await st.set(wsKey(rec.grade), rec))) return false;
+  if (f.writePointer && !(await st.set("activeGrade", rec.grade))) return false;
+  if (f.clearLegacy) await Promise.all(LEGACY_KEYS.map(k => st.set(k, null)));
+  return true;
+}
+/* Launch: read everything needed; ANY failed read -> { err: true } (the app shows Retry and saves nothing). */
+async function launchStore(st, { defaultConfig, made }) {
+  const [cR, hR] = await Promise.all([st.read("classes"), st.read("history")]);      // the move to a grade depends on these: a failed read is never "none"
+  if (!cR.ok || !hR.ok) return { err: true };
+  const classes = Array.isArray(cR.value) ? cR.value : [], history = Array.isArray(hR.value) ? hR.value : [];
+  const agR = await st.read("activeGrade"); if (!agR.ok) return { err: true };
+  const ag = GRADES.includes(agR.value) ? agR.value : null;
+  let ws = null, legacy = { config: defaultConfig }; const existing = {};
+  if (ag) { const r = await st.read(wsKey(ag)); if (!r.ok) return { err: true }; ws = r.value;
+    if (ws && ws.config) { if (made) made.add(ag); await indexAdd(st, ag, made); } }   // keep the shared list complete (a failure here is harmless)
+  else {
+    const rs = await Promise.all([...LEGACY_KEYS, ...GRADES.map(wsKey)].map(k => st.read(k)));
+    if (rs.some(r => !r.ok)) return { err: true };
+    legacy = { config: rs[0].value || defaultConfig, key: rs[1].value, keySaved: !!rs[2].value, students: rs[3].value || [], absent: rs[4].value || [] };
+    GRADES.forEach((g, i) => { const v = rs[LEGACY_KEYS.length + i].value; if (v && v.config) { existing[g] = v; if (made) made.add(g); } });
+  }
+  const plan = planLoad({ ag, ws, legacy, classes, history, existing });
+  if (plan.err) return { ...plan, classes, history };
+  if (plan.set) plan.saved = await commitPlan(st, plan.set, plan);
+  return { ...plan, classes, history };
+}
+/* Joven answered "which grade is the unfinished exam for?": move the old data there (never over an existing record). */
+async function migrateTo(st, plan, g) {
+  const r = await st.read(wsKey(g));
+  if (!r.ok) return { ok: false, err: "Couldn't check your saved work. Check the internet and try again." };
+  if (r.value && r.value.config) {                                // a record is already there: open it, do not overwrite it
+    if (!(await indexAdd(st, g)) || !(await st.set("activeGrade", g))) return { ok: false, err: "Saving failed. Try again." };
+    return { ok: true, rec: { ...wsRecord({ ...r.value, grade: g }), at: r.value.at } };
+  }
+  const rec = plan.fromLegacy(g);
+  if (!(await commitPlan(st, rec, { writeRec: true, writePointer: true, clearLegacy: true, indexList: [] }))) return { ok: false, err: "Saving failed. Try again." };
+  return { ok: true, rec };
+}
+/* Switch grade in storage: read the next grade's record FIRST (a failed read stops everything, nothing is written),
+   save this grade's record through the same ordered writer as every other save, make sure the next grade has a record,
+   THEN point activeGrade at it. Any failed save: stop and stay on this grade. Returns { ok, next, fresh } or { ok: false, err }. */
+async function switchStore(st, curOrGet, g, sec, classes, writer, made, opt = {}) {
+  const now = () => (typeof curOrGet === "function" ? curOrGet() : curOrGet);   // the LATEST work, read at the moment it is saved
+  const rd = await st.read(wsKey(g));
+  if (!rd.ok) return { ok: false, err: `Couldn't open ${g}. Check the internet and try again.` };
+  const t = rd.value, has = !!(t && t.config && (!t.grade || t.grade === g));
+  // an EMPTY answer is only believed for a truly new grade; otherwise refuse (opt.force = Joven tapped "Start <grade> empty" twice)
+  if (!has && !opt.force && (await emptyLooksWrong(st, g, made, opt.history, classes)))
+    return { ok: false, err: `Couldn't open ${g}. Check the internet and try again.`, canStartEmpty: true };
+  const w = writer || makeWsWriter(st), cur = now();
+  if (!(await w.flush(wsRecord(cur)))) return { ok: false, err: `Couldn't save ${cur.grade}'s work, so the grade was not switched. Try again.` };
+  let section = sec !== undefined ? sec : has ? t.section || "" : "";
+  if (!section) section = firstSectionOf(classes, g);
+  const next = has ? wsRecord({ ...t, grade: g, section }) : freshWs(g, section, cur.config);   // fresh ONLY after an ok read that found nothing
+  if (!has && !(await indexAdd(st, g, made))) return { ok: false, err: `Couldn't open ${g}. Check the internet and try again.` };   // shared list first, then the record
+  if (!(await w.flush(next))) return { ok: false, err: `Couldn't open ${g}. Try again.` };
+  if (!(await st.set("activeGrade", g))) return { ok: false, err: `Couldn't switch to ${g}. Try again.` };
+  return { ok: true, next, fresh: !has };
+}
+/* Grade mark vs the grade being checked: "wrong" = never saved automatically, "unclear" = teacher must check and tap Save,
+   "old" = older sheet with no mark (saved with a gentle note), "ok". */
+function gradeCheck(sheetGrade, gradeMark, grade) {
+  if (sheetGrade && sheetGrade !== grade) return "wrong";
+  if (gradeMark === "unclear") return "unclear";
+  if (gradeMark === "none") return "old";
+  return "ok";
+}
 /* One pasted line -> a learner name. Handles "1. DELA CRUZ, JUAN", "B1  DELA CRUZ, JUAN", Excel rows with tabs (LRN, No., Name…). */
 function cleanName(line) {
   let cells = String(line).split("\t").map(c => c.trim()).filter(Boolean);
@@ -1761,7 +1997,7 @@ function RosterPage({ label, initial, onSave, onBack, onDownload, onCodeList, fl
 
 function BlankPreview({ o }) {
   const ref = useRef(null);
-  useEffect(() => { const c = ref.current; if (!c) return; const k = 2; c.width = 210 * k; c.height = 297 * k; const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); drawPage(canvasPen(ctx, k), o, blankList(1)); }, [o.n, o.subject, o.exam, o.profile.school, o.profile.region, o.profile.division]);
+  useEffect(() => { const c = ref.current; if (!c) return; const k = 2; c.width = 210 * k; c.height = 297 * k; const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); drawPage(canvasPen(ctx, k), o, blankList(1)); }, [o.n, o.grade, o.subject, o.exam, o.profile.school, o.profile.region, o.profile.division]);
   return <canvas ref={ref} className="bg-white shadow-lg" style={{ width: 300, height: 424 }} />;
 }
 
@@ -2221,7 +2457,7 @@ function App() {
   const tags = subj.comps ? (config.tags && config.tags.length === n ? config.tags : defaultTags(n, subj.comps)) : null;
   const compOf = i => (tags ? subj.comps[tags[i]] : "");
   const [quick, setQuick] = useState({});
-  const setTags = async t => { const c = { ...config, tags: t }; setConfig(c); await store.set("config", c); };
+  const setTags = async t => { const c = { ...config, tags: t }; setConfig(c); };   // saved with this grade's record
   const cycleTag = i => setTags(tags.map((t, j) => j === i ? (t + 1) % subj.comps.length : t));
   const applyQuick = ci => {
     const items = parseItems(quick[ci], n);
@@ -2232,17 +2468,23 @@ function App() {
   const unlocked = profile.configured && keySaved;
 
   /* load saved data */
-  useEffect(() => {
-    (async () => {
+  const [loadErr, setLoadErr] = useState(false);
+  const loadAll = async () => {
+      setLoadErr(false);
       await store.init();
       setSaveMode(store.db ? "Saved to your Claude account" : "Saved in this browser only");
-      const [p, c, k, ks, cl, h, pm, ss, ab] = await Promise.all([
-        store.get("profile", DEFAULT_PROFILE), store.get("config", DEFAULT_CONFIG), store.get("key", null),
-        store.get("keySaved", false), store.get("classes", []), store.get("history", []), store.get("passMarkV2", 70),
-        store.get("sessionStudents", []), store.get("sessionAbsent", [])]);
-      setProfile(p); setConfig(c); if (k) setKey(k); setKeySaved(!!ks); setClasses(cl || []); setHistory(h || []); setPassMark(pm || 70);
-      if (Array.isArray(ss) && ss.length) setStudents(ss);                        // scanning survives closing the browser
-      if (Array.isArray(ab) && ab.length) setAbsent(ab);
+      const [p, pm] = await Promise.all([store.get("profile", DEFAULT_PROFILE), store.get("passMarkV2", 70)]);
+      setProfile(p); setPassMark(pm || 70);
+      // the grade being worked on, with ITS OWN key, settings and scans (scanning survives closing the browser).
+      // If anything can't be read (no internet), show Retry and save NOTHING: a failed read is never treated as "empty".
+      // classes and History are read here too (safely): the move of an old exam to a grade depends on them
+      const plan = await launchStore(made.store, { defaultConfig: DEFAULT_CONFIG, made });
+      if (plan.err) { setLoadErr(plan.missing || true); setLoaded(true); return; }
+      const cl = plan.classes, h = plan.history; setClasses(cl); setHistory(h);
+      if (plan.set) { applyWs(plan.set); setWsOn(true); }
+      else {                                           // old unfinished exam + classes in several grades: ask Joven which grade it is (nothing is moved until he answers)
+        applyWs(plan.fromLegacy(plan.ask.suggest)); migRef.current = plan; setMigAsk(plan.ask);
+      }
       const rs = {};
       for (const lbl of (cl || [])) {
         let v = localStore.get(rosterKey(lbl), null);
@@ -2252,8 +2494,8 @@ function App() {
       setRosters(rs);
       setLoaded(true);
       if (!p.configured) setModal("profile");
-    })();
-  }, []);
+  };
+  useEffect(() => { loadAll().catch(() => { setLoadErr(true); setLoaded(true); }); }, []);
 
   const saveProfile = async p => { setProfile(p); setModal(null); await store.set("profile", p); flash("Profile saved. Your answer sheet header is updated."); };
 
@@ -2265,16 +2507,15 @@ function App() {
     if (c.examType === "summative" && s.termOnly) c.subject = "mapeh-music-arts";
     if (patch.examType && !("itemCount" in patch)) { c.itemCount = c.examType === "summative" ? 25 : 50; itemsChanged = true; }
     if (itemsChanged || patch.subject || patch.examType || !c.tags || c.tags.length !== c.itemCount) c.tags = defaultTags(c.itemCount, subjectOf(c.subject).comps);
-    setConfig(c); await store.set("config", c);
+    setConfig(c);                                                  // saved with this grade's record
     if (itemsChanged) {
       const k = Array.from({ length: c.itemCount }, (_, i) => key[i] || "A");
-      setKey(k); setKeySaved(false); await store.set("key", k); await store.set("keySaved", false);
+      setKey(k); setKeySaved(false);
       setModal("keyPrompt");
     }
   };
 
   const saveKey = async () => {
-    await store.set("key", key); await store.set("keySaved", true);
     setKeySaved(true); setModal("copyPrompt");
   };
 
@@ -2282,7 +2523,6 @@ function App() {
     const c = { ...config, itemCount: k.length };
     if (!c.tags || c.tags.length !== k.length) c.tags = defaultTags(k.length, subjectOf(c.subject).comps);
     setConfig(c); setKey(k); setKeySaved(true);
-    await store.set("config", c); await store.set("key", k); await store.set("keySaved", true);
   };
 
   const addClass = async () => {
@@ -2291,7 +2531,56 @@ function App() {
     if (classes.includes(label)) return flash("That class is already saved.");
     const cl = [...classes, label]; setClasses(cl); setSection(up(section.trim())); await store.set("classes", cl); flash("Class saved.");
   };
-  const pickClass = label => { const [g, ...s] = label.split(" – "); setGrade(g); setSection(s.join(" – ")); };
+  /* ---- grade workspaces (see GRADE WORKSPACES above) ---- */
+  const applyWs = r => { setGrade(r.grade); setSection(r.section || ""); setConfig(r.config); setKey(r.key); setKeySaved(!!r.keySaved); setStudents(r.students || []); setAbsent(r.absent || []); };
+  const [wsOn, setWsOn] = useState(false);          // true once the grade's record is the one being saved
+  const [migAsk, setMigAsk] = useState(null); const migRef = useRef(null);
+  const made = useMemo(() => wsMadeTracker(store, localStore), []);     // notes which grades have a saved record (this device)
+  const wsWriter = useMemo(() => makeWsWriter(made.store, () => flash("Not saved online yet, will retry.")), []);
+  useEffect(() => () => wsWriter.cancel(), []);                    // app closed: stop the retry timers
+  const [switchFail, setSwitchFail] = useState(null), [armSwitchEmpty, setArmSwitchEmpty] = useState(false);   // a switch was refused: Try again / Cancel / Start empty
+  const [armEmpty, setArmEmpty] = useState(false);
+  const startEmpty = async g => {                                  // the ONLY way to create a grade's empty record after a bad read (asked twice)
+    if (!armEmpty) { setArmEmpty(true); return; }
+    setArmEmpty(false);
+    if (!(await indexAdd(made.store, g, made)) || !(await made.store.set(wsKey(g), freshWs(g, "", DEFAULT_CONFIG)))) { flash("Saving failed. Check the internet and try again."); return; }
+    setLoaded(false); loadAll().catch(() => { setLoadErr(true); setLoaded(true); });
+  };
+  const curRef = useRef(null); curRef.current = { grade, section, config, key, keySaved, students, absent };
+  const switchingRef = useRef(false); const gradeRef = useRef(grade); gradeRef.current = grade;
+  const getGrade = () => (switchingRef.current ? "" : gradeRef.current);   // the scanner refuses to save while switching / into another grade
+  const [switchingTo, setSwitchingTo] = useState("");
+  const [scanBusy, setScanBusy] = useState(false), [scanWaiting, setScanWaiting] = useState(0), [askSwitch, setAskSwitch] = useState(null);
+  const gradeLocked = !!switchingTo || scanBusy || !wsOn;
+  const scanBusyRef = useRef(false); scanBusyRef.current = scanBusy;
+  const doSwitch = async (g, sec, force = false) => {
+    if (scanBusyRef.current) { setAskSwitch(null); flash("Wait a moment: a sheet is still being read."); return; }
+    if (switchingRef.current) return; switchingRef.current = true; setSwitchingTo(g); setAskSwitch(null); setSwitchFail(null); setArmSwitchEmpty(false);
+    try {
+      const r = await switchStore(made.store, () => curRef.current, g, sec, classes, wsWriter, made, { history, force });   // same ordered writer as every other save
+      if (!r.ok) { flash(r.err); if (r.canStartEmpty) setSwitchFail({ g, sec }); return; }
+      applyWs(r.next); setRawText(""); setExSel({ cls: "", subject: "", term: "" });
+      if (!r.next.keySaved) setTab(x => (x === "scan" ? x : "setup"));   // no key yet for this grade: the report tabs are locked
+      flash(r.fresh ? `Now on ${g}. Set its exam and answer key.` : `Now on ${g}. Its own key and scanned sheets are back.`);
+    } catch (e) { flash(`Couldn't switch to ${g}. Check the internet and try again.`); }
+    finally { switchingRef.current = false; setSwitchingTo(""); }
+  };
+  const switchGrade = (g, sec) => {
+    if (g === grade) { if (sec !== undefined) setSection(sec); return; }
+    if (gradeLocked) { flash(scanBusy ? "Wait a moment: a sheet is still being read." : "Wait a moment…"); return; }
+    if (scanWaiting > 0) { setAskSwitch({ g, sec, n: scanWaiting }); return; }
+    doSwitch(g, sec);
+  };
+  const [migBusy, setMigBusy] = useState(false);
+  const answerMig = async g => {                                   // first launch after the update: put the old exam in the grade Joven picked
+    if (migBusy) return; setMigBusy(true);
+    const r = await migrateTo(made.store, migRef.current, g).catch(() => ({ ok: false, err: "Saving failed. Try again." })); setMigBusy(false);
+    if (!r.ok) { flash(r.err); return; }
+    applyWs(r.rec); setMigAsk(null); setWsOn(true); flash(`Your unfinished exam is now under ${g}.`);
+  };
+  // every change of the current grade's work is saved as ONE record for that grade
+  useEffect(() => { if (loaded && wsOn && !migAsk) wsWriter.put(wsRecord({ grade, section, config, key, keySaved, students, absent })); }, [loaded, wsOn, migAsk, grade, section, config, key, keySaved, students, absent]);
+  const pickClass = label => { const [g, ...s] = label.split(" – "); switchGrade(g, s.join(" – ")); };
   const saveRoster = async (label, rs) => {
     const ok = localStore.set(rosterKey(label), rs);
     if (ok) { setRosters(x => ({ ...x, [label]: rs })); flash(`Students of ${label} saved.`); } else flash("Saving failed. Try again.");
@@ -2318,8 +2607,7 @@ function App() {
 
   /* learners */
   const addScanned = st => setStudents(list => [...list.filter(x => up(x.student_id) !== st.student_id), st]);
-  useEffect(() => { if (loaded) store.set("sessionStudents", students); }, [students, loaded]);
-  useEffect(() => { if (loaded) store.set("sessionAbsent", absent); }, [absent, loaded]);
+  // scanned sheets and absences are saved with this grade's record (see GRADE WORKSPACES), not in the old single keys
   const markAbsent = code => { setAbsent(a => (a.includes(code) ? a : [...a, code])); flash(code + " marked ABSENT for this exam."); };
   const unmarkAbsent = code => setAbsent(a => a.filter(x => x !== code));
   const loadJson = () => {
@@ -2327,7 +2615,8 @@ function App() {
       const o = JSON.parse(rawText);
       const list = Array.isArray(o) ? o : (o.students || o.studentData);
       if (!Array.isArray(list)) throw new Error('Expected an array or { "students": [...] }');
-      setStudents(list); setRawErr(""); flash(`${list.length} learners loaded.`);
+      // privacy: names never leave the device. Keep codes and answers only (names come from the class list on this device).
+      setStudents(list.map(x => (x && typeof x === "object" ? { ...x, student_name: "", name: "" } : x))); setRawErr(""); flash(`${list.length} learners loaded.`);
     } catch (e) { setRawErr(e.message); }
   };
 
@@ -2496,14 +2785,17 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
     setTab("history");
   };
   const [exSel, setExSel] = useState({ cls: "", subject: "", term: "" });
+  const [histAll, setHistAll] = useState(false);                    // History shows this grade only, unless "all grades" is ticked
+  const shownHist = histAll ? history : history.filter(h => gradeOf(h.gradeSection) === grade);
   const exOptions = useMemo(() => {
-    const cls = [...new Set(history.filter(h => h.scores).map(h => h.gradeSection))];
-    const subs = [...new Set(history.filter(h => h.scores && (!exSel.cls || h.gradeSection === exSel.cls)).map(h => h.subject))];
-    const terms = [...new Set(history.filter(h => h.scores).map(h => h.term).filter(Boolean))].sort();
+    const cls = [...new Set(history.filter(h => h.scores && (histAll || gradeOf(h.gradeSection) === grade)).map(h => h.gradeSection))];
+    const inGrade = h => histAll || gradeOf(h.gradeSection) === grade;
+    const subs = [...new Set(history.filter(h => h.scores && inGrade(h) && (!exSel.cls || !cls.includes(exSel.cls) || h.gradeSection === exSel.cls)).map(h => h.subject))];
+    const terms = [...new Set(history.filter(h => h.scores && inGrade(h)).map(h => h.term).filter(Boolean))].sort();
     return { cls, subs, terms };
-  }, [history, exSel.cls]);
+  }, [history, exSel.cls, grade, histAll]);
   const exData = useMemo(() => {
-    const cls = exSel.cls || exOptions.cls[0], sub = exSel.subject || exOptions.subs[0], tm = exSel.term || exOptions.terms[0];
+    const cls = (exOptions.cls.includes(exSel.cls) && exSel.cls) || exOptions.cls[0], sub = (exOptions.subs.includes(exSel.subject) && exSel.subject) || exOptions.subs[0], tm = (exOptions.terms.includes(exSel.term) && exSel.term) || exOptions.terms[0];
     if (!cls || !sub) return null;
     const pick = sl => history.filter(h => h.scores && h.gradeSection === cls && h.subject === sub && h.term === tm && h.slot === sl).sort((a, b) => b.at.localeCompare(a.at))[0] || null;
     const st1 = pick("ST1"), st2 = pick("ST2"), te = pick("TE");
@@ -2541,7 +2833,8 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
       if (wipeCloud) { try { if (!Sync.hasToken()) await Sync.connect(""); await Sync.wipeCloud(); } catch (e) { setResetBusy(false); flash("Couldn't erase the synced copy in Google Drive (" + e.message + "). Nothing was erased. Try again."); return; } }
       Sync.turnOff();
     }
-    const keys = ["profile", "config", "key", "keySaved", "classes", "history", "passMark", "passMarkV2", "sessionStudents", "sessionAbsent", ...classes.map(rosterKey)];
+    await wsWriter.idle(); wsWriter.cancel();                     // no older grade save (or retry) may land after the wipe
+    const keys = ["profile", "config", "key", "keySaved", "classes", "history", "passMark", "passMarkV2", "sessionStudents", "sessionAbsent", "activeGrade", "activeSection", "wsIndex", ...GRADES.map(wsKey), ...classes.map(rosterKey)];
     let ok = true;
     for (const k of keys) { if (!(await store.set(k, null))) ok = false; }
     await imgStore.wipe();
@@ -2550,14 +2843,14 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
     setProfile(DEFAULT_PROFILE); setConfig(DEFAULT_CONFIG); setKey(Array(50).fill("A")); setKeySaved(false);
     setClasses([]); setRosters({}); setHistory([]); setPassMark(70); setStudents([]); setAbsent([]); setRawText("");
     setGrade("Grade 7"); setSection(""); setRosterView(null); setOpenHist(null); setTab("setup");
+    made.clear();                                                // start again in Grade 7's own empty space: shared list, record, THEN the pointer
+    if ((await store.set("wsIndex", ["Grade 7"])) && (await made.store.set(wsKey("Grade 7"), freshWs("Grade 7", "", DEFAULT_CONFIG)))) await store.set("activeGrade", "Grade 7");
     setResetBusy(false); setModal("profile");
     flash(ok ? "All data erased. Set up your school profile to start again." : "Data cleared here, but some saved items could not be erased. Try Reset again.");
   };
   const resetExam = async () => {
     setStudents([]); setAbsent([]); setRawText(""); setKey(Array(config.itemCount).fill("A")); setKeySaved(false);
-    await store.set("key", Array(config.itemCount).fill("A")); await store.set("keySaved", false);
-    await store.set("sessionStudents", null); await store.set("sessionAbsent", null);
-    setModal(null); setTab("setup"); flash("Cleared. Set up the next exam.");
+    setModal(null); setTab("setup"); flash(`Cleared ${grade}. Set up its next exam.`);
   };
 
   const goTab = t => {
@@ -2611,6 +2904,29 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
   );
 
   if (!loaded) return <div className="min-h-screen flex items-center justify-center text-cyan-300">Loading JordynAI…</div>;
+  if (loadErr) return (                                             // a read failed: never guess "empty", never save
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <Card className="max-w-md w-full text-center">
+        <div className="text-4xl mb-2">📶</div>
+        <h2 className="text-xl font-black text-white mb-2">Couldn't load your saved work</h2>
+        <p className="text-sm text-slate-300 mb-4">Your key and scanned sheets are safe. Check the internet, then tap Retry.</p>
+        <button onClick={() => { setArmEmpty(false); setLoaded(false); loadAll().catch(() => { setLoadErr(true); setLoaded(true); }); }} className="w-full py-4 rounded-xl bg-cyan-500 text-slate-950 text-lg font-black">↻ Retry</button>
+        {typeof loadErr === "string" && <>
+          <button onClick={() => startEmpty(loadErr)} className={`w-full mt-3 py-3 rounded-xl text-sm font-bold ${armEmpty ? "bg-red-600 text-white" : "bg-white/10 text-slate-300"}`}>{armEmpty ? `Tap again: start ${loadErr} EMPTY (its saved key and scans will not be used)` : `Start ${loadErr} empty`}</button>
+          <p className="text-[11px] text-slate-500 mt-2">Only if Retry keeps failing AND you are sure {loadErr} has no saved key or scans.</p></>}
+      </Card>
+    </div>);
+  if (migAsk) return (                                              // asked ONCE, the first time after the grade update
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <Card className="max-w-md w-full text-center">
+        <div className="text-4xl mb-2">🏷️</div>
+        <h2 className="text-xl font-black text-white mb-2">Which grade is your unfinished exam for?</h2>
+        <p className="text-sm text-slate-300 mb-1">{migAsk.items} items · answer key {migAsk.keySaved ? "saved" : "not saved yet"} · {migAsk.scanned} sheet(s) scanned</p>
+        <p className="text-xs text-slate-400 mb-4">Each grade now has its own answer key, exam settings and scanned sheets. Tap the grade this exam belongs to.</p>
+        <div className="space-y-2">{migAsk.choices.map(g =>
+          <button key={g} disabled={migBusy} onClick={() => answerMig(g)} className={`disabled:opacity-50 w-full py-4 rounded-xl text-lg font-black ${g === migAsk.suggest ? "bg-amber-400 text-slate-950" : "bg-white/10 text-white hover:bg-white/15"}`}>{g}{g === migAsk.suggest ? "  (your latest exam)" : ""}</button>)}</div>
+      </Card>
+    </div>);
 
   return (
     <div className="min-h-screen">
@@ -2639,6 +2955,16 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
 
         {rosterView && <RosterPage key={rosterView} label={rosterView} initial={rosters[rosterView]} flash={flash} onBack={() => setRosterView(null)} onSave={rs => saveRoster(rosterView, rs)} onDownload={(rs, kind, extra) => downloadSheets(rosterView, rs, kind, extra)} onCodeList={rs => downloadCodeList(rosterView, rs)} />}
         {!rosterView && <>
+        {/* GRADE SWITCH: each grade is its own space (key, exam settings, scanned sheets, history) */}
+        <div className="glass rounded-2xl p-2 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] uppercase tracking-widest text-slate-400 font-bold px-1">Grade</span>
+          {GRADES.filter(g => g === grade || classes.some(c => gradeOf(c) === g)).map(g =>
+            <button key={g} disabled={gradeLocked && g !== grade} onClick={() => switchGrade(g)} className={`px-5 py-2.5 rounded-xl text-base font-black transition disabled:opacity-50 ${g === grade ? "bg-amber-400 text-slate-950 shadow-lg" : "bg-white/10 text-slate-200 hover:bg-white/15"}`}>{switchingTo === g ? "Switching…" : g}</button>)}
+          <label className={`relative px-3 py-2 rounded-xl border border-dashed border-white/25 text-xs text-slate-300 ${gradeLocked ? "opacity-50" : "cursor-pointer hover:bg-white/10"}`}>+ Grade
+            <select value="" disabled={gradeLocked} onChange={e => e.target.value && switchGrade(e.target.value)} className="absolute inset-0 opacity-0 w-full cursor-pointer" aria-label="Open another grade">
+              <option value="">Open another grade…</option>{GRADES.filter(g => g !== grade).map(g => <option key={g} value={g}>{g}</option>)}</select></label>
+          <span className="text-[11px] text-slate-400 px-1">{examLabel} · {n} items · {keySaved ? "key ✔" : "no key yet"} · {students.length} scanned</span>
+        </div>
         {/* TABS */}
         <nav className="flex flex-wrap gap-1 glass rounded-2xl p-1">
           {TABS.map(([k, l]) => {
@@ -2725,23 +3051,24 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
           <Card>
             <h2 className="font-black text-white text-lg mb-3">🏷️ Class Setup</h2>
             <div className="grid md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
-              <label><Label>Grade</Label><Select value={grade} onChange={e => setGrade(e.target.value)}>{GRADES.map(g => <option key={g}>{g}</option>)}</Select></label>
+              <label><Label>Grade</Label><Select value={grade} disabled={gradeLocked} onChange={e => switchGrade(e.target.value)}>{GRADES.map(g => <option key={g}>{g}</option>)}</Select></label>
               <label><Label>Section</Label><Input value={section} placeholder="e.g. WALING-WALING" onChange={e => setSection(up(e.target.value))} /></label>
               <button onClick={addClass} className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-sm">+ Save class</button>
             </div>
             {classes.length > 0 && <div className="flex flex-wrap gap-2 mt-3">
-              {classes.map(c => <span key={c} className={`flex items-center gap-1 text-xs rounded-full pl-3 pr-1 py-1 border ${c === `${grade} – ${section}` ? "bg-cyan-500/20 border-cyan-400 text-cyan-100" : "border-white/15 text-slate-300"}`}>
+              {classes.filter(c => gradeOf(c) === grade).map(c => <span key={c} className={`flex items-center gap-1 text-xs rounded-full pl-3 pr-1 py-1 border ${c === `${grade} – ${section}` ? "bg-cyan-500/20 border-cyan-400 text-cyan-100" : "border-white/15 text-slate-300"}`}>
                 <button onClick={() => pickClass(c)}>{c}</button>
                 <button onClick={() => removeClass(c)} className="w-5 h-5 rounded-full hover:bg-white/10 text-slate-400">×</button></span>)}
             </div>}
+            {classes.some(c => gradeOf(c) !== grade) && <p className="text-[11px] text-slate-500 mt-2">Classes of other grades are under their own Grade button at the top.</p>}
             {classes.length > 0 && <div className="flex flex-wrap gap-2 mt-2">
-              {classes.map(c => <button key={c} onClick={() => setRosterView(c)} className="text-[11px] px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/25">
+              {classes.filter(c => gradeOf(c) === grade).map(c => <button key={c} onClick={() => setRosterView(c)} className="text-[11px] px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/25">
                 👥 Add Students from {sectionOf(c)}{rosterCount(c) ? ` (${rosterCount(c)})` : ""}</button>)}
             </div>}
             <p className="text-xs text-slate-400 mt-3">Checking now: <b className="text-white">{gradeSection}</b> · {examLabel} · {subj.label} · {n} items · {students.length} learner(s) loaded{roster ? ` · ${roster.boys.filter(Boolean).length + roster.girls.filter(Boolean).length} enrolled in the student list` : " · no student list yet"}</p>
             <details className="mt-3">
               <summary className="text-xs text-cyan-300 cursor-pointer">Paste learner answers as JSON (optional, instead of scanning)</summary>
-              <textarea value={rawText} onChange={e => setRawText(e.target.value)} spellCheck="false" placeholder='{"students":[{"student_id":"B-1","student_name":"Dela Cruz, Juan","responses":{"1":"A","2":"B"}}]}'
+              <textarea value={rawText} onChange={e => setRawText(e.target.value)} spellCheck="false" placeholder='{"students":[{"student_id":"B-1","responses":{"1":"A","2":"B"}}]}  (codes only: names are removed)'
                 className="mt-2 w-full min-h-[8rem] font-mono text-xs bg-slate-950/70 border border-white/10 rounded-lg p-2 text-slate-200" />
               {rawErr && <p className="text-xs text-red-400">JSON error: {rawErr}</p>}
               <button onClick={loadJson} className="mt-1 px-3 py-1.5 text-xs rounded-lg bg-cyan-500 text-slate-950 font-bold">Load JSON</button>
@@ -2751,7 +3078,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
         </>}
 
         {tab === "scan" && profile.configured && <>
-          <ScanPanel onStudent={addScanned} onKey={onScannedKey} n={n} hasKey={keySaved} meta={imgMeta}
+          <ScanPanel key={grade} grade={grade} getGrade={getGrade} onBusy={setScanBusy} onWaiting={setScanWaiting} onStudent={addScanned} onKey={onScannedKey} n={n} hasKey={keySaved} meta={imgMeta}
             queue={scanQueue} scannedIds={scannedIds} absent={absent} onAbsent={markAbsent} onUnabsent={unmarkAbsent}
             gradeSection={gradeSection} onReport={makeReport} />
           <Card><p className="text-sm text-slate-300">{students.length} learner(s) in <b>{gradeSection}</b>. {students.length > 0 && <button onClick={() => setTab("grades")} className="text-cyan-300 underline">See Gradesheet →</button>}</p></Card>
@@ -2842,9 +3169,9 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
             <p className="text-[11px] text-slate-500 mt-1">"incomplete" = the learner is missing one of the three tests. Initials come from the learner list on this device.</p>
           </div>}
           <h3 className="font-black text-white mb-1">🗂️ Finalized Sessions</h3>
-          <p className="text-xs text-slate-400 mb-3">{saveMode}.</p>
-          {history.length === 0 ? <p className="text-sm text-slate-500">No finalized sessions yet. Finalize one from the Summary tab.</p> :
-            <div className="space-y-2">{history.map(h => (
+          <p className="text-xs text-slate-400 mb-3">{saveMode}. Showing {histAll ? "all grades" : <b className="text-white">{grade} only</b>}. <label className="ml-1 cursor-pointer"><input type="checkbox" checked={histAll} onChange={e => setHistAll(e.target.checked)} className="align-middle" /> show all grades</label></p>
+          {shownHist.length === 0 ? <p className="text-sm text-slate-500">No finalized sessions for {histAll ? "any grade" : grade} yet. Finalize one from the Summary tab.</p> :
+            <div className="space-y-2">{shownHist.map(h => (
               <div key={h.id} className="bg-slate-900/60 border border-white/10 rounded-xl p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
@@ -2879,6 +3206,22 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
           <p className="text-sm text-slate-400 mb-4">Tap A, B, C or D for each item, then press <b>Save Answer Key</b>.</p>
           <button onClick={() => { setModal(null); setTab("setup"); setTimeout(() => keyRef.current && keyRef.current.scrollIntoView({ behavior: "smooth" }), 50); }} className="w-full py-2.5 rounded-xl bg-cyan-500 text-slate-950 font-bold">Encode Answer Keys</button></div>
       </Modal>}
+      {switchFail && <Modal onClose={() => { setSwitchFail(null); setArmSwitchEmpty(false); }}>
+        <div className="text-center"><div className="text-4xl mb-2">📶</div>
+          <h3 className="text-lg font-black text-white mb-2">Couldn't open {switchFail.g}</h3>
+          <p className="text-sm text-slate-400 mb-4">Check the internet and try again. Your saved work is safe. You are still on {grade}.</p>
+          <div className="flex gap-2"><button onClick={() => { setSwitchFail(null); setArmSwitchEmpty(false); }} className="flex-1 py-2.5 rounded-xl bg-white/10">Cancel</button>
+            <button onClick={() => doSwitch(switchFail.g, switchFail.sec)} className="flex-1 py-2.5 rounded-xl bg-cyan-500 text-slate-950 font-bold">↻ Try again</button></div>
+          <button onClick={() => { if (!armSwitchEmpty) { setArmSwitchEmpty(true); return; } doSwitch(switchFail.g, switchFail.sec, true); }} className={`w-full mt-3 py-3 rounded-xl text-sm font-bold ${armSwitchEmpty ? "bg-red-600 text-white" : "bg-white/10 text-slate-300"}`}>{armSwitchEmpty ? `Tap again: start ${switchFail.g} EMPTY (its saved key and scans will not be used)` : `Start ${switchFail.g} empty`}</button>
+          <p className="text-[11px] text-slate-500 mt-2">Only if Try again keeps failing AND you are sure {switchFail.g} has no saved key or scans (for example after Reset All).</p></div>
+      </Modal>}
+      {askSwitch && <Modal onClose={() => setAskSwitch(null)}>
+        <div className="text-center"><div className="text-4xl mb-2">⚠️</div>
+          <h3 className="text-lg font-black text-white mb-2">{askSwitch.n} scanned sheet{askSwitch.n > 1 ? "s are" : " is"} not saved yet</h3>
+          <p className="text-sm text-slate-400 mb-4">They are waiting for your check in the Scanner list. If you switch to {askSwitch.g} now, they are cleared and must be rescanned.</p>
+          <div className="flex gap-2"><button onClick={() => setAskSwitch(null)} className="flex-1 py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold">Stay and check them</button>
+            <button onClick={() => doSwitch(askSwitch.g, askSwitch.sec)} className="flex-1 py-2.5 rounded-xl bg-white/10">Switch anyway</button></div></div>
+      </Modal>}
       {modal === "copyPrompt" && <Modal onClose={() => setModal(null)}>
         <div className="text-center"><div className="text-4xl mb-2">📄</div>
           <h3 className="text-lg font-black text-white mb-2">Answer key saved! All tabs are unlocked.</h3>
@@ -2887,12 +3230,12 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
             <button onClick={() => setModal("copyAS")} className="flex-1 py-2.5 rounded-xl bg-amber-400 text-slate-950 font-bold">Copy A/S</button></div></div>
       </Modal>}
       {modal === "copyAS" && (() => {
-        const o = { profile, n, subject: subj.label, exam: `${examLabel} · ${term}` };
+        const o = { profile, grade, n, subject: subj.label, exam: `${examLabel} · ${term}` };
         const dl = async kind => {
           try {
             setBlankBusy(kind);
             const pages = Math.max(1, Math.min(25, +blankPages || 1)); setBlankPages(pages);
-            const name = `DepEd_Extra_Answer_Sheets_${n}items_${pages * 4}sheets`;
+            const name = `DepEd_Extra_Answer_Sheets_${grade.replace(/\s+/g, "")}_${n}items_${pages * 4}sheets`;
             if (kind === "pdf") { if (!window.jspdf) throw new Error("PDF tool not loaded"); await saveFile(sheetsPdf(o, blankList(pages)), name + ".pdf", "application/pdf"); }
             else { if (!window.docx) throw new Error("Word tool not loaded"); await saveFile(await sheetsDocx(o, blankList(pages)), name + ".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"); }
           } catch (e) { flash("Couldn't make the file: " + (e.message || "try again")); }
@@ -2901,10 +3244,10 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
         return (
           <Modal wide onClose={() => setModal(null)}>
             <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-              <h3 className="text-lg font-black text-white">📄 Extra Answer Sheets (blank) · {n} items</h3>
+              <h3 className="text-lg font-black text-white">📄 Extra Answer Sheets (blank) · {grade} · {n} items</h3>
               <button onClick={() => setModal(null)} className="text-slate-400 text-xl">✕</button>
             </div>
-            <p className="text-xs text-slate-400 mb-3">For <b>late enrollees</b> and <b>replacement sheets</b> when a learner spoils their own. Your region, division and school are printed; <b>Name, Grade &amp; Section, Date and CODE are left blank</b> to write by hand. Subject and exam come from the current settings ({subj.label} · {examLabel} · {term}).</p>
+            <p className="text-xs text-slate-400 mb-3">For <b>late enrollees</b> and <b>replacement sheets</b> when a learner spoils their own. Your region, division and school are printed; <b>Name, Grade &amp; Section, Date and CODE are left blank</b> to write by hand. The grade level (<b>{grade}</b>) is printed in big letters and in a dot mark, so the scanner refuses it while you check another grade. Subject and exam come from the current settings ({subj.label} · {examLabel} · {term}).</p>
             <div className="grid md:grid-cols-[auto_1fr] gap-4 items-start">
               <div className="bg-slate-200 rounded-xl p-3 flex justify-center"><BlankPreview o={o} /></div>
               <div className="space-y-3">
