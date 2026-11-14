@@ -356,18 +356,92 @@ function coarseCorners(G) {                       // quick check used by the liv
   const c = cornerCandidates(G);
   return c && c.roles ? { pts: c.roles.map(b => ({ x: b.x, y: b.y })), thr: c.thr } : null;
 }
-function cornerCandidates(G) {
+function cornerCandidates(G) {                    // first set with 4 corner roles, else the first loose set
+  let loose = null;
+  for (const c of cornerCandidateSets(G)) { if (c.roles) return c; if (!loose) loose = c; }
+  return loose;
+}
+/* Candidate sets: the plain search first (light table: unchanged), then, only if needed, the same search with
+   everything outside the paper painted paper-white (dark table or cloth, see paperMasked). */
+let CORNER_INFO = null;                             // numbers from the last corner search (live-camera diagnostic, no recomputing)
+function* cornerCandidateSets(G) {
+  CORNER_INFO = { frame: [G.W, G.H], paperMask: false };
+  const plain = cornerSearch(G, "plain"); if (plain) yield plain;
+  const M = paperMasked(G); if (!M) return;
+  CORNER_INFO.paperMask = true; CORNER_INFO.paperLevel = M.P;
+  const m = cornerSearch(M, "paper"); if (m) yield Object.assign(m, { hull: M.hull, P: M.P });
+}
+/* Why the live camera found no corners (numbers only, for the scan log): darkness, blob counts, dark-table search. */
+function cornerDiag() {                            // reads CORNER_INFO from the search that just ran
+  const I = CORNER_INFO || {}, blobs = I.plain || [0, 0, 0, 0], pb = I.paper || null;
+  const why = !I.paperMask ? (Math.max(...blobs) < 4 ? "fewDarkSquares" : "noSheetShape") : !pb || Math.max(...pb) < 4 ? "paperFoundNoSquares" : "paperNoSheetShape";
+  return { why, frame: I.frame, mean: I.mean, blobs, paperMask: !!I.paperMask, paperLevel: I.paperLevel == null ? null : I.paperLevel, paperBlobs: pb ? Math.max(...pb) : 0 };
+}
+function cornerSearch(G, tag) {
   let sum = 0; for (let i = 0; i < G.W * G.H; i++) sum += G.g[i];
-  const mean = sum / (G.W * G.H);
+  const mean = sum / (G.W * G.H), counts = [];
+  if (tag && CORNER_INFO) { CORNER_INFO[tag] = counts; if (tag === "plain") CORNER_INFO.mean = Math.round(mean); }
   let loose = null;
   for (const f of [0.5, 0.62, 0.38, 0.75]) {       // several darkness levels: bright AND dim rooms
     const thr = Math.min(f >= 0.62 ? 125 : 100, mean * f);
-    const blobs = blobsAt(G, thr);
+    const blobs = blobsAt(G, thr); counts.push(blobs.length);
     const roles = rolesFromExtremes(G, blobs);
     if (roles) return { roles, thr, blobs };
     if (!loose && blobs.length >= 4) loose = { roles: null, thr, blobs };
   }
   return loose;
+}
+/* DARK TABLE / CLOTH: the thin paper margin blurs away in the camera, so each black corner square melts into the dark
+   background (one huge blob that is no square). Find the paper first (the largest bright region), then paint everything
+   outside its outline (convex hull) paper-white: the corner squares are separate dark squares again.
+   Returns a gray image like toGray's plus { hull, P }, or null (no separate bright paper: e.g. a light table). */
+function paperMasked(G) {
+  const { g, W, H } = G, N = W * H, hist = new Float64Array(256);
+  for (let i = 0; i < N; i++) hist[g[i]]++;
+  let all = 0; for (let t = 0; t < 256; t++) all += t * hist[t];
+  let wB = 0, sB = 0, bestV = -1, T = 128;                                   // Otsu: background/ink vs paper
+  for (let t = 0; t < 255; t++) { wB += hist[t]; sB += t * hist[t]; if (!wB || wB === N) continue;
+    const mB = sB / wB, mF = (all - sB) / (N - wB), v = wB * (N - wB) * (mB - mF) * (mB - mF); if (v > bestV) { bestV = v; T = t; } }
+  const seen = new Uint8Array(N), st = new Int32Array(N); let best = -1, bestN = 0;
+  const flood = (i0, ext) => {                                               // 4-connected bright region; ext = per-row x extents
+    let top = 0, n = 0, sum = 0; st[top++] = i0; seen[i0] = 1;
+    while (top) { const j = st[--top], x = j % W, y = (j / W) | 0; n++; sum += g[j];
+      if (ext) { if (x < ext[2 * y]) ext[2 * y] = x; if (x > ext[2 * y + 1]) ext[2 * y + 1] = x; }
+      if (x > 0 && !seen[j - 1] && g[j - 1] > T) { seen[j - 1] = 1; st[top++] = j - 1; }
+      if (x < W - 1 && !seen[j + 1] && g[j + 1] > T) { seen[j + 1] = 1; st[top++] = j + 1; }
+      if (y > 0 && !seen[j - W] && g[j - W] > T) { seen[j - W] = 1; st[top++] = j - W; }
+      if (y < H - 1 && !seen[j + W] && g[j + W] > T) { seen[j + W] = 1; st[top++] = j + W; } }
+    return { n, sum };
+  };
+  for (let i = 0; i < N; i++) if (!seen[i] && g[i] > T) { const r = flood(i, null); if (r.n > bestN) { bestN = r.n; best = i; } }
+  if (best < 0 || bestN < N * 0.04) return null;                             // no paper-sized bright region
+  seen.fill(0); const ext = new Int32Array(2 * H); for (let y = 0; y < H; y++) { ext[2 * y] = W; ext[2 * y + 1] = -1; }
+  const { n, sum } = flood(best, ext);
+  const pts = []; let x0 = W, x1 = 0, y0 = H, y1 = 0;
+  for (let y = 0; y < H; y++) if (ext[2 * y + 1] >= 0) { pts.push([ext[2 * y] - 0.5, y], [ext[2 * y + 1] + 0.5, y]);
+    x0 = Math.min(x0, ext[2 * y]); x1 = Math.max(x1, ext[2 * y + 1]); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  if (x1 - x0 > W * 0.97 && y1 - y0 > H * 0.97) return null;                // bright region fills the photo: not a dark table
+  pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);                            // convex hull (monotone chain)
+  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]), lo = [], hi = [];
+  for (const p of pts) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (hi.length >= 2 && cr(hi[hi.length - 2], hi[hi.length - 1], p) <= 0) hi.pop(); hi.push(p); }
+  const hull = lo.slice(0, -1).concat(hi.slice(0, -1)), P = Math.round(sum / n);
+  return { ...maskHull(G, hull, P), hull, P };
+}
+/* Copy of G with every pixel outside the convex polygon `hull` set to P. */
+function maskHull(G, hull, P) {
+  const { g, W, H } = G, out = new Uint8Array(g);
+  for (let y = 0; y < H; y++) {
+    let xl = Infinity, xr = -Infinity;
+    for (let i = 0; i < hull.length; i++) { const [ax, ay] = hull[i], [bx, by] = hull[(i + 1) % hull.length];
+      if ((ay <= y && by >= y) || (by <= y && ay >= y)) { const x = ay === by ? Math.min(ax, bx) : ax + (y - ay) * (bx - ax) / (by - ay), x2 = ay === by ? Math.max(ax, bx) : x;
+        xl = Math.min(xl, x, x2); xr = Math.max(xr, x, x2); } }
+    const row = y * W;
+    if (xl > xr) { out.fill(P, row, row + W); continue; }
+    const a = Math.max(0, Math.min(W, Math.ceil(xl))), b = Math.max(0, Math.min(W, Math.floor(xr) + 1));
+    out.fill(P, row, row + a); out.fill(P, row + b, row + W);
+  }
+  return { g: out, W, H, k: G.k };
 }
 function blobsAt(G, thr) {
   const { g, W, H } = G;
@@ -422,8 +496,8 @@ function rolesFromExtremes(G, blobs) {
   return roles && quadShape(G, roles) ? roles : null;
 }
 /* Precise centers on a bigger image: flood-fill the dark square nearest each coarse guess. */
-function refineCorners(G, guess, thr) {
-  const { g, W, H } = G;
+function refineCorners(G, guess, thr, box) {      // box: max |dx|,|dy| from the guess (px). Keeps the fill inside one
+  const { g, W, H } = G;                            // corner square when it touches a dark table, a shadow or pen marks
   return guess.map(p => {
     const cx = Math.round(p.x), cy = Math.round(p.y);
     let start = -1;
@@ -435,7 +509,8 @@ function refineCorners(G, guess, thr) {
     const seen = new Set([start]), st = [start]; let n = 0, sx = 0, sy = 0; const lim = W * H * 0.03;
     while (st.length && n < lim) {
       const j = st.pop(), x = j % W, y = (j / W) | 0; n++; sx += x; sy += y;
-      for (const q of [x > 0 ? j - 1 : -1, x < W - 1 ? j + 1 : -1, j - W, j + W]) if (q >= 0 && q < W * H && !seen.has(q) && g[q] <= thr) { seen.add(q); st.push(q); }
+      for (const q of [x > 0 ? j - 1 : -1, x < W - 1 ? j + 1 : -1, j - W, j + W]) if (q >= 0 && q < W * H && !seen.has(q) && g[q] <= thr
+        && !(box && (Math.abs(q % W - cx) > box || Math.abs(((q / W) | 0) - cy) > box))) { seen.add(q); st.push(q); }
     }
     return { x: sx / n, y: sy / n };
   });
@@ -460,10 +535,11 @@ const CORNER_MM = GEO.corners.map(([x, y]) => [x + GEO.cornerSize / 2, y + GEO.c
 
 /* Bubble-ring score for a candidate mapping: how well the printed bubble outlines line up.
    Samples a band of radii per angle so slightly-off scale or thin print still counts. */
-function ringScoreAt(G, map, n, paper, rowStep) {
+function ringScoreAt(G, map0, n, paper, rowStep, offs) {     // offs: per-row local alignment (bubbleOffsets), optional
   const { L, centers } = bubbleCenters(n), r = L.b / 2;
   let dark = 0, tot = 0;
   for (let qi = 0; qi < centers.length; qi += rowStep) {
+    const map = offs ? shiftMap(map0, offs[qi].dx, offs[qi].dy) : map0;
     for (const [cx, cy] of centers[qi]) for (let a = 0; a < 16; a++) {
       const ca = Math.cos(a / 8 * Math.PI), sa = Math.sin(a / 8 * Math.PI);
       let best = 255;
@@ -474,11 +550,11 @@ function ringScoreAt(G, map, n, paper, rowStep) {
   return dark / tot;
 }
 /* Between-bubble gaps must be bright paper: random junk and misaligned maps fail this. */
-function gapScoreAt(G, map, n, paper, rowStep) {
+function gapScoreAt(G, map0, n, paper, rowStep, offs) {     // offs: per-row local alignment, optional
   const { centers } = bubbleCenters(n);
   let bright = 0, tot = 0;
   for (let qi = 0; qi < centers.length; qi += rowStep) {
-    const row = centers[qi], cy = row[0][1];
+    const row = centers[qi], cy = row[0][1], map = offs ? shiftMap(map0, offs[qi].dx, offs[qi].dy) : map0;
     for (let i = 0; i < 3; i++) { const [x, y] = map((row[i][0] + row[i + 1][0]) / 2, cy); tot++; if (lum(G, x, y) > paper * 0.75) bright++; }
   }
   return tot ? bright / tot : 0;
@@ -487,15 +563,27 @@ function gapScoreAt(G, map, n, paper, rowStep) {
    combinations), keep the mapping whose bubble grid truly matches. Returns
    { G, pts, map, paper, score } or null. */
 function locateSheet(src, n) {
-  const small = toGray(src, 520), cand = cornerCandidates(small);
-  if (!cand) return null;
-  const G = toGray(src, 2200), k = G.k / small.k;
+  const small = toGray(src, 520); let G = null, best = null;
+  for (const cand of cornerCandidateSets(small)) {  // plain search first; the dark-table search only if that finds no good sheet
+    if (!G) G = toGray(src, 2200);
+    const r = locateWith(small, G, cand, n);
+    if (r && (!best || r.score > best.score)) best = r;
+    if (best && best.ring >= 0.5 && best.gap >= 0.5) break;                // bubble rings AND clean gaps: the sheet, not a dark pattern
+  }
+  return best;
+}
+function locateWith(small, G, cand, n) {
+  const k = G.k / small.k;
+  const Gr = cand.hull ? maskHull(G, cand.hull.map(([x, y]) => [x * k, y * k]), cand.P) : G;   // dark table: refine on the masked photo
   const permsOf = shape => (shape.portrait ? [[0, 1, 2, 3], [3, 2, 1, 0]] : [[1, 3, 0, 2], [2, 0, 3, 1]]); // upright/180 or the two sideways
   const paperAt = map => { const probes = GEO.paperProbe.map(([x, y]) => patchMedian(G, map, x, y, 0.6)).sort((a, b) => a - b); return probes[(probes.length / 2) | 0]; };
   // full check with refined corners
   const tryRoles = roles => {
     const shape = quadShape(small, roles); if (!shape) return null;
-    const pts = refineCorners(G, roles.map(p => ({ x: p.x * k, y: p.y * k })), cand.thr + 10);
+    const side = (Math.hypot(roles[1].x - roles[0].x, roles[1].y - roles[0].y) + Math.hypot(roles[3].x - roles[2].x, roles[3].y - roles[2].y)
+      + Math.hypot(roles[2].x - roles[0].x, roles[2].y - roles[0].y) + Math.hypot(roles[3].x - roles[1].x, roles[3].y - roles[1].y)) / 4 * k;
+    const sq = side / ((92 + 135.5) / 2) * GEO.cornerSize;                         // corner square size in px (average of both sheet sides)
+    const pts = refineCorners(Gr, roles.map(p => ({ x: p.x * k, y: p.y * k })), cand.thr + 10, Math.max(4, sq * 1.2));
     let best = null;
     for (const pm of permsOf(shape)) {
       const ordered = pm.map(i => pts[i]);
@@ -503,8 +591,9 @@ function locateSheet(src, n) {
       const paper = paperAt(map);
       if (paper < 60) continue;                                       // mapped onto something dark: not this way up
       const ring = ringScoreAt(G, map, n, paper, 3), gap = gapScoreAt(G, map, n, paper, 3);
-      const score = ring * 0.75 + gap * 0.25;
-      if (!best || score > best.score) best = { G, pts: ordered, map, paper, score, ring, gap };
+      // + the CODE box outline (top right when upright): tells upright from upside down when curl blurs the bubble pattern
+      const plain = ring * 0.75 + gap * 0.25, score = plain + 0.2 * Math.min(1, Math.max(0, boxEdge(G, map) / (paper * 0.4)));
+      if (!best || score > best.score) best = { G, pts: ordered, map, paper, score, plain, ring, gap };
     }
     return best;
   };
@@ -560,7 +649,7 @@ function locateSheet(src, n) {
   }
   // several sheets in view: the one nearest the middle of the photo is the one being scanned
   if (good.length) best = good.reduce((a, b) => (b.score - centrality(b) * 0.6 > a.score - centrality(a) * 0.6 ? b : a));
-  return best && best.score >= 0.18 ? best : null;
+  return best && best.plain >= 0.18 ? best : null;                          // the old acceptance rule, without the CODE box bonus
 }
 function lum(G, x, y) { const xi = Math.round(x), yi = Math.round(y); if (xi < 0 || yi < 0 || xi >= G.W || yi >= G.H) return 255; return G.g[yi * G.W + xi]; }
 function patchMedian(G, map, xmm, ymm, rmm) {
@@ -589,6 +678,62 @@ function inkLevel(G, map, x0, x1, cy, h) {
   for (let i = 0; i <= 16; i++) for (let j = -4; j <= 4; j++) { const [x, y] = map(x0 + (x1 - x0) * i / 16, cy + j / 4 * h); v.push(lum(G, x, y)); }
   v.sort((a, b) => a - b); return (v[1] + v[2] + v[3]) / 3;                 // thin digit strokes: a few darkest samples
 }
+/* LOCAL ALIGNMENT: paper curl, lens bend or a corner found slightly off can shift small marks by 1-2 mm: enough to read
+   the 1.6 mm CODE dots one dot over, or to miss shaded bubbles. Each part is re-aligned on its own printed lines.
+   Offsets are in sheet mm; GEO itself (printing) is never changed. */
+const shiftMap = (map, dx, dy) => (dx || dy ? (x, y) => map(x + dx, y + dy) : map);
+/* The printed CODE box outline is the anchor for the CODE and grade dots: dark line, paper just inside it. Searches +-3 mm. */
+const BOX_PTS = (() => { const B = GEO.codeBox, pts = [];                    // [x, y, inward unit x, inward unit y] on the CODE box outline
+  for (let t = 0.15; t <= 0.851; t += 0.05) pts.push([B.x + B.w * t, B.y, 0, 1], [B.x + B.w * t, B.y + B.h, 0, -1]);
+  for (let t = 0.15; t <= 0.851; t += 0.05) pts.push([B.x, B.y + B.h * t, 1, 0], [B.x + B.w, B.y + B.h * t, -1, 0]);
+  return pts; })();
+/* A small mm shift (dx, dy) near (x, y) as a pixel shift: the photo is locally flat, so offsets are tried without re-mapping every sample. */
+const localShift = (map, x, y) => { const [x0, y0] = map(x, y), [x1, y1] = map(x + 1, y), [x2, y2] = map(x, y + 1);
+  return (dx, dy) => [(x1 - x0) * dx + (x2 - x0) * dy, (y1 - y0) * dx + (y2 - y0) * dy]; };
+function boxScorer(G, map) {                                                   // how clearly the CODE box outline is there: a thin line
+  const B = GEO.codeBox, sh = localShift(map, B.x + B.w / 2, B.y + B.h / 2);  // with paper on BOTH sides (never the paper's own edge)
+  const P = BOX_PTS.map(([x, y, ux, uy]) => [-0.25, 0, 0.25, 0.9, -0.9].map(d => map(x + ux * d, y + uy * d)));
+  return (dx, dy) => { const [ox, oy] = sh(dx, dy); let s = 0;
+    for (const q of P) s += Math.min(lum(G, q[3][0] + ox, q[3][1] + oy), lum(G, q[4][0] + ox, q[4][1] + oy)) - Math.min(lum(G, q[0][0] + ox, q[0][1] + oy), lum(G, q[1][0] + ox, q[1][1] + oy), lum(G, q[2][0] + ox, q[2][1] + oy));
+    return s / P.length; };
+}
+const boxEdge = (G, map) => boxScorer(G, map)(0, 0);
+function codeBoxOffset(G, map) {
+  const score = boxScorer(G, map);
+  const s0 = score(0, 0); let best = { dx: 0, dy: 0, v: s0 };
+  for (let dy = -3; dy <= 3; dy += 0.5) for (let dx = -3; dx <= 3; dx += 0.5) { const v = score(dx, dy); if (v > best.v + 0.01) best = { dx, dy, v }; }
+  const c0 = best; for (let dy = -0.25; dy <= 0.25; dy += 0.25) for (let dx = -0.25; dx <= 0.25; dx += 0.25) {
+    const v = score(c0.dx + dx, c0.dy + dy); if (v > best.v + 0.01) best = { dx: c0.dx + dx, dy: c0.dy + dy, v }; }
+  const edge = Math.abs(best.dx) >= 3 || Math.abs(best.dy) >= 3;              // best at the search edge: something else, not the box
+  return !edge && best.v >= 25 && best.v > s0 + 6 ? { ...best, found: true } : { dx: 0, dy: 0, v: s0, found: s0 >= 25 };   // not clearly found elsewhere: keep the corner position
+}
+/* Bubble grid: per column, in bands of up to 5 rows, the offset where the printed bubble outlines stand out most
+   (dark ring, paper just inside and outside it). Shaded bubbles are dark inside too, so they never pull the grid. */
+function bubbleOffsets(G, map, n) {
+  const { L, centers } = bubbleCenters(n), r = L.b / 2, out = Array(n).fill(null).map(() => ({ dx: 0, dy: 0 }));
+  const reach = Math.min(2, 0.35 * Math.min(L.b + L.gap, L.rowH));            // well under half a bubble step: never one bubble over
+  const F = [0.7, 1.25, 0.92, 1, 1.08];
+  for (let c = 0; c < L.cols; c++) for (let s0 = 0; s0 < L.rows; s0 += 5) {
+    const qs = []; for (let rr = s0; rr < Math.min(s0 + 5, L.rows); rr++) { const q = c * L.rows + rr; if (q < n) qs.push(q); }
+    if (!qs.length) continue;
+    const mid = centers[qs[(qs.length / 2) | 0]][1], sh = localShift(map, mid[0], mid[1]), P = [];   // sample pixels at zero offset
+    for (const q of qs) for (const [cx, cy] of centers[q]) for (let a = 0; a < 12; a++) { const ca = Math.cos(a / 6 * Math.PI), sa = Math.sin(a / 6 * Math.PI);
+      for (const f of F) P.push(...map(cx + ca * r * f, cy + sa * r * f)); }
+    const S = (qs_, dx, dy) => { const [ox, oy] = sh(dx, dy); let s = 0;
+      for (let i = 0; i < P.length; i += 10) { const L = j => lum(G, P[i + j] + ox, P[i + j + 1] + oy);
+        s += Math.max(0, Math.min(L(0), L(2)) - Math.min(L(4), L(6), L(8))); }
+      return s / (P.length / 10); };
+    const base = S(qs, 0, 0); let best = { dx: 0, dy: 0, v: base };
+    for (let dy = -reach; dy <= reach + 1e-9; dy += reach / 2) for (let dx = -reach; dx <= reach + 1e-9; dx += reach / 2) { const v = S(qs, dx, dy); if (v > best.v + 0.01) best = { dx, dy, v }; }
+    for (const step of [reach / 4, reach / 8]) { const c0 = best;                // coarse to fine, never beyond +-reach
+      for (let dy = -step; dy <= step + 1e-9; dy += step) for (let dx = -step; dx <= step + 1e-9; dx += step) {
+        const x = c0.dx + dx, y = c0.dy + dy; if (Math.abs(x) > reach + 1e-9 || Math.abs(y) > reach + 1e-9) continue;
+        const v = S(qs, x, y); if (v > best.v + 0.01) best = { dx: x, dy: y, v }; } }
+    const atEdge = Math.abs(best.dx) > reach - 1e-9 || Math.abs(best.dy) > reach - 1e-9;   // best at the limit: maybe a bubble over, keep as is
+    if (!atEdge && best.v > base + Math.max(6, base * 0.15)) qs.forEach(q => { out[q] = { dx: best.dx, dy: best.dy }; });   // clearly better lined up, else leave as is
+  }
+  return out;
+}
 /* Grade dots -> { sheetGrade: "Grade 8" | null, gradeMark: "ok" | "unclear" | "none" (older sheet) }. */
 function readGradeMark(G, map, paper) {
   const GD = GEO.gradeDots, at = i => [GD.x0 + i * GD.step + GD.size / 2, GD.y + GD.size / 2];
@@ -599,6 +744,9 @@ function readGradeMark(G, map, paper) {
     for (let a = 0; a <= 8; a++) for (let b = 0; b <= 8; b++) { const [x, y] = map(x0 + w * a / 8, y0 + w * b / 8); v.push(lum(G, x, y)); }
     v.sort((p, q) => p - q); return v[2]; };                                     // 3rd darkest: one noisy pixel is not ink
   if (Array.from({ length: GD.count }, (_, i) => inkIn(i)).every(v => v > gPaper * 0.75)) return { sheetGrade: null, gradeMark: "none" };
+  let fine = { dx: 0, dy: 0, v: 255 };                                         // the start dot's exact spot: up to 0.6 mm around
+  for (let dy = -0.6; dy <= 0.601; dy += 0.2) for (let dx = -0.6; dx <= 0.601; dx += 0.2) { const v = patchMedian(G, map, at(0)[0] + dx, at(0)[1] + dy, GD.size * 0.2); if (v < fine.v - 0.5) fine = { dx, dy, v }; }
+  map = shiftMap(map, fine.dx, fine.dy);
   const gInk = patchMedian(G, map, ...at(0), GD.size * 0.2);                  // the first dot is ALWAYS black on new sheets
   if (gInk > gPaper * 0.6) return { sheetGrade: null, gradeMark: "unclear" };  // something is printed here, but the start dot is not clear
   const thr = Math.max(gPaper * 0.55, gInk + (gPaper - gInk) * 0.5);
@@ -625,8 +773,9 @@ function readSheet(src, n) {
     const r2 = ringScoreAt(G, map, n2, paper, 3); if (r2 > altRing) altRing = r2;
   }
   const answers = [], flagged = [], fills = [];
-  const { noW } = bubbleCenters(n);
+  const { noW } = bubbleCenters(n), base = map, offs = bubbleOffsets(G, base, n);
   centers.forEach((row, qi) => {
+    const map = shiftMap(base, offs[qi].dx, offs[qi].dy);                     // this row's local alignment (curl, lens)
     const cy = row[0][1], above = cy - (r + (L.rowH / 2 - r) / 2), below = cy + (r + (L.rowH / 2 - r) / 2);
     const white = Math.max(patchMedian(G, map, row[1][0], above, 0.3), patchMedian(G, map, row[2][0], below, 0.3), paper * 0.8);
     // local black = the printed item number beside this row. Glare or shadow lifts both together,
@@ -648,19 +797,36 @@ function readSheet(src, n) {
     }
     else { answers.push(null); flagged.push(qi + 1); }                           // double, light or erased
   });
-  // CODE dots
-  const D = GEO.dots, codeBoxPaper = Math.max(patchMedian(G, map, GEO.codeBox.x + GEO.codeBox.w / 2, GEO.codeBox.y + 5.2, 0.4), paper * 0.8);
-  // the first dot is ALWAYS printed black: use it as this spot's black, threshold halfway to the paper
-  const dotAt = i => [D.x0 + i * D.step + D.size / 2, D.y + D.size / 2];
-  const dotInk = patchMedian(G, map, ...dotAt(0), D.size * 0.2);
-  const dotThr = Math.max(codeBoxPaper * 0.55, dotInk + (codeBoxPaper - dotInk) * 0.5);
-  const dotFill = Array.from({ length: D.count }, (_, i) => fillOf(G, map, ...dotAt(i), D.size * 0.3, dotThr));
+  // CODE dots: aligned on the printed CODE box outline, then on the start dot (always black)
+  const box = codeBoxOffset(G, base), D = GEO.dots, dotAt = i => [D.x0 + i * D.step + D.size / 2, D.y + D.size / 2];
+  const dotRead = m => { const cbp = Math.max(patchMedian(G, m, GEO.codeBox.x + GEO.codeBox.w / 2, GEO.codeBox.y + 5.2, 0.4), paper * 0.8);
+    const ink = patchMedian(G, m, ...dotAt(0), D.size * 0.2), thr = Math.max(cbp * 0.55, ink + (cbp - ink) * 0.5);
+    const fl = Array.from({ length: D.count }, (_, i) => fillOf(G, m, ...dotAt(i), D.size * 0.3, thr));
+    return { cbp, ink, thr, fl, crisp: fl.reduce((t, f) => t + Math.abs(2 * f - 1), 0) / fl.length }; };
+  let dr = dotRead(shiftMap(base, box.dx, box.dy)), dotShift = [box.dx, box.dy];
+  // CODE box outline not clearly seen (blur, or the corners are off): never trust a shifted reading, read where the corners say
+  const boxThere = box.found && box.v >= dr.cbp * 0.12;
+  if (!boxThere) { dr = dotRead(base); dotShift = [0, 0]; }
+  else if (dr.ink < dr.cbp * 0.6) {                                           // fine-tune ONLY an already-black start dot (never hunt for one:
+    const at0 = dr; let fx = 0, fy = 0;                                       // the next black dot would give a confident wrong code)
+    for (let dy = -0.6; dy <= 0.601; dy += 0.2) for (let dx = -0.6; dx <= 0.601; dx += 0.2) {
+      const t = dotRead(shiftMap(base, box.dx + dx, box.dy + dy));
+      if (t.ink < t.cbp * 0.6 && t.crisp > dr.crisp + 0.02) { dr = t; fx = dx; fy = dy; }
+    }
+    if (Math.abs(fx) > 0.59 || Math.abs(fy) > 0.59) { dr = at0; fx = fy = 0; }  // best at the edge of the search: not trusted
+    dotShift = [box.dx + fx, box.dy + fy];
+  }
+  // the first dot is ALWAYS printed black: use it as this spot's black, threshold halfway to the paper (dotRead)
+  const { cbp: codeBoxPaper, ink: dotInk, thr: dotThr, fl: dotFill } = dr;
   const bits = dotFill.map(f => (f > 0.5 ? 1 : 0));
-  const codeSure = dotFill.every(f => f < 0.3 || f > 0.7);                   // half-dark dots = unsure: never guess a code
+  const codeSure = dotInk < codeBoxPaper * 0.6 && dotFill.every(f => f < 0.3 || f > 0.7) && bitsToCode(bits) !== null;   // start dot not black, or half-dark dots: never guess a code
   const code = codeSure ? bitsToCode(bits) : null;
-  const { sheetGrade, gradeMark } = readGradeMark(G, map, paper);
-  const diag = { stage: "read", ...locDiag, altRing, codeBoxPaper, dotInk, dotThr, dotFill };
-  return { ok: true, diag, answers, flagged, fills, code, codeSure, bits, sheetGrade, gradeMark, ringScore, gapScore, layoutOk: ringScore > 0.3 && gapScore > 0.5 && !(altRing > ringScore * 1.25 && altRing > 0.45), paper, map, G, pts: loc.pts };
+  const { sheetGrade, gradeMark } = readGradeMark(G, boxThere ? shiftMap(base, box.dx, box.dy) : base, paper);   // grade dots sit beside the CODE box
+  const shifted = offs.filter(o => o.dx || o.dy).length;
+  const ringAligned = shifted ? ringScoreAt(G, base, n, paper, 1, offs) : ringScore;   // curl moved some rows: judge the layout where they really are
+  const gapAligned = shifted ? gapScoreAt(G, base, n, paper, 1, offs) : gapScore;
+  const diag = { stage: "read", ...locDiag, altRing, codeBoxPaper, dotInk, dotThr, dotFill, boxShift: [box.dx, box.dy], dotShift, rowsShifted: shifted };
+  return { ok: true, diag, answers, flagged, fills, code, codeSure, bits, sheetGrade, gradeMark, ringScore, gapScore, layoutOk: Math.max(ringScore, ringAligned) > 0.3 && Math.max(gapScore, gapAligned) > 0.5 && !(altRing > ringScore * 1.25 && altRing > 0.45), paper, map, G, pts: loc.pts };
 }
 /* Straightened 1050 x 1485 crop (for thumbnails and the Claude backup). */
 function warpCrop(res, ppm = 5, x0 = 0, y0 = 0, x1 = GEO.W, y1 = GEO.H) {
@@ -688,7 +854,7 @@ const CFG = Object.assign({ googleClientId: "", turnstileSiteKey: "" }, window.J
 const TURNSTILE_TEST_KEY = "1x00000000000000000000AA";   // Cloudflare's public test key (always passes)
 /* APP VERSION: raise this number with every update. The website checks the file on the server (never the cached copy);
    if the server has a newer version, the page reloads once by itself (only right after opening) or shows a Reload bar. */
-const APP_VERSION = 2026111303;
+const APP_VERSION = 2026111305;
 const newerVersionIn = (html, cur) => { const m = String(html || "").match(/const APP_VERSION = (\d+);/); return m && +m[1] > cur ? +m[1] : 0; };
 (() => {
   if (!CFG.googleClientId || !/^https?:$/.test(location.protocol) || window.claude) return;      // website only (not inside Claude)
@@ -1401,7 +1567,7 @@ function SheetAligner({ file, index, total, onDone, onSkip, onCancel }) {
 }
 
 /* ===================== LIVE CAMERA (auto-capture when the 4 corners are steady) ===================== */
-function LiveScanner({ n, onResult, onClose }) {
+function LiveScanner({ n, onResult, onClose, onMiss }) {
   useEffect(() => { window.__jordynBusy = (window.__jordynBusy || 0) + 1; return () => { window.__jordynBusy = Math.max(0, (window.__jordynBusy || 1) - 1); }; }, []);   // random human check waits while scanning
   const videoRef = useRef(null), streamRef = useRef(null);
   const [status, setStatus] = useState("Starting camera…");
@@ -1412,7 +1578,9 @@ function LiveScanner({ n, onResult, onClose }) {
   const [torch, setTorch] = useState(false), [torchMsg, setTorchMsg] = useState("");
   const torchRef = useRef(null);
   const toggleTorch = async () => { const t = torchRef.current; if (!t) return; try { await t.applyConstraints({ advanced: [{ torch: !torch }] }); setTorch(!torch); } catch (e) {} };
-  const state = useRef({ hist: [], lastCode: null, cooldownUntil: 0, needGone: false, gone: 0 });
+  const state = useRef({ hist: [], lastCode: null, cooldownUntil: 0, needGone: false, gone: 0, miss: null });
+  const onMissRef = useRef(onMiss); onMissRef.current = onMiss;
+  useEffect(() => () => { const m = state.current.miss; if (m && onMissRef.current) try { onMissRef.current(m); } catch (e) {} }, []);   // ONE summary per live session
 
   useEffect(() => {
     let alive = true, timer = null;
@@ -1462,6 +1630,13 @@ function LiveScanner({ n, onResult, onClose }) {
       const loc = locateSheet(v, n);
       if (loc && loc.ring >= 0.5) { const f = small.W / loc.G.W; cc = { pts: loc.pts.map(p => ({ x: p.x * f, y: p.y * f })) }; }
     }
+    if (!cc) try {                                                // scan log: why no corners, counted per reason (numbers only)
+      const d = cornerDiag();
+      if (d.why !== "fewDarkSquares" || d.paperMask) {              // nothing sheet-like in view (pointing away): not counted
+        const m = st.miss || (st.miss = { misses: 0, reasons: {}, last: null });
+        m.misses++; m.reasons[d.why] = (m.reasons[d.why] || 0) + 1; m.last = d;
+      }
+    } catch (e) {}
     if (!cc) { st.hist = []; st.gone++; if (st.gone >= 2) { st.needGone = false; st.lastCode = null; } if (Date.now() > st.cooldownUntil) setStatus("Show ONE sheet inside the frame, with all 4 black corners visible."); return; }
     st.gone = 0;
     if (Date.now() < st.cooldownUntil || st.needGone) return;
@@ -1513,6 +1688,7 @@ function scanLogEntry(res, ctx) {
   if (d.photo) e.photo = d.photo;
   ["locScore", "locRing", "locGap", "paper", "altRing", "codeBoxPaper", "dotInk", "dotThr", "ringScore", "gapScore"].forEach(k => { if (d[k] != null) e[k] = r3(d[k]); });
   if (d.cornerInk) e.cornerInk = rArr(d.cornerInk);
+  ["boxShift", "dotShift"].forEach(k => { if (d[k]) e[k] = rArr(d[k]); }); if (d.rowsShifted != null) e.rowsShifted = d.rowsShifted;
   if (d.dotFill) e.dotFill = rArr(d.dotFill);
   if (res && res.ok) {
     Object.assign(e, { codeRead: res.code || "", codeSure: !!res.codeSure, bits: res.bits, ringScore: r3(res.ringScore), gapScore: r3(res.gapScore), layoutOk: !!res.layoutOk,
@@ -1800,7 +1976,7 @@ function ScanPanel({ onStudent, onKey, n, hasKey, meta, queue, scannedIds, absen
           </div>))}
       </div>
       </>}
-      {live && !paused && <LiveScanner n={n} onClose={() => setLive(false)} onResult={res => { setBusyN(x => x + 1); handleResult(res, "live camera", null).finally(() => setBusyN(x => x - 1)); }} />}
+      {live && !paused && <LiveScanner n={n} onMiss={m => ScanLog.add({ ...scanLogEntry({ ok: false, reason: "corners", diag: { stage: "liveNoCorners" } }, { id: "m" + Date.now().toString(36), grade, section: section || "", n, src: "live" }), ...m })} onClose={() => setLive(false)} onResult={res => { setBusyN(x => x + 1); handleResult(res, "live camera", null).finally(() => setBusyN(x => x - 1)); }} />}
       <ScanFlash fx={fx} />
       {blankAsk && (() => {
         const c0 = up(blankAsk.code).replace(/\s/g, ""), m = c0.match(/^([BG])-?(\d{1,2})$/), code = m ? `${m[1]}-${+m[2]}` : "";
@@ -3058,7 +3234,7 @@ Mastered Items (75% correct and up): ${data.mastered.length ? data.mastered.map(
   const sendScanLog = () => {
     const entries = ScanLog.read(); setLogCount(entries.length);
     if (!entries.length) return flash("The scan log is empty. Scan some sheets first.");
-    const out = { app: "JordynAI Exam Analyzer", version: APP_VERSION, exported: new Date().toISOString(), device: navigator.userAgent, scans: entries.length,
+    const out = { app: "JordynAI Exam Analyzer", version: APP_VERSION, exported: new Date().toISOString(), device: navigator.userAgent, scans: entries.filter(e => e && e.stage !== "liveNoCorners").length,
       note: "Numbers only: no learner names, no photos, no name strips.", entries };
     saveFile(JSON.stringify(out, null, 1), `jordynai-scanlog-${new Date().toISOString().slice(0, 10)}.json`, "application/json");
   };
